@@ -1,0 +1,70 @@
+services:
+  grocy:
+    image: lscr.io/linuxserver/grocy:latest
+    container_name: grocy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Toronto
+    volumes:
+      - ./grocy-data:/config
+    restart: unless-stopped
+
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:latest
+    container_name: mealie
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Toronto
+      - BASE_URL=http://kitchen.local:9925
+      - DEFAULT_EMAIL=${MEALIE_DEFAULT_EMAIL}
+      - DEFAULT_PASSWORD=${MEALIE_DEFAULT_PASSWORD}
+    volumes:
+      - ./mealie-data:/app/data
+    ports:
+      - "9925:9000"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx/kitchen.crt:/etc/nginx/certs/kitchen.crt
+      - ./nginx/kitchen.key:/etc/nginx/certs/kitchen.key
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - grocy
+      - mealie
+    restart: unless-stopped
+
+  whisper:
+    image: python:3.11-slim
+    container_name: whisper
+    environment:
+      - GROCY_URL=http://grocy:80
+      - GROCY_API_KEY=${GROCY_API_KEY}
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+    volumes:
+      - ./whisper:/app
+    ports:
+      - "9100:9100"
+    working_dir: /app
+    command: bash -c "pip install faster-whisper flask requests 2>/dev/null && python server.py"
+    restart: unless-stopped
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    network_mode: host
+    environment:
+      - TZ=America/Toronto
+    volumes:
+      - ./homeassistant:/config
+    restart: unless-stopped
+    privileged: true
