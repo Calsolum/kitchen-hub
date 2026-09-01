@@ -4,7 +4,7 @@ A self-hosted kitchen dashboard running on a Raspberry Pi 5, mounted on the frid
 
 Everything runs locally — no cloud dependency for the core features, no subscription, no third party holding the data.
 
-<!-- Add a screenshot of the live dashboard here -->
+![Kitchen Hub dashboard](screenshot.png)
 
 ## What it does
 
