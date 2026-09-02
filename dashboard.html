@@ -44,6 +44,7 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 @keyframes shimmer { 0% { background-position: 0%; } 100% { background-position: 200%; } }
 .logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 20px; color: var(--accent); }
 .logo span { color: var(--muted); font-weight: 400; }
+.logo-address { font-size: 10px; color: var(--muted); letter-spacing: 1px; margin-top: 2px; opacity: 0.7; }
 .clock { font-family: 'DM Serif Display', serif; font-size: 44px; line-height: 1; letter-spacing: -2px; text-align: center; }
 .datestr { font-size: 10px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; text-align: center; margin-top: 2px; }
 .weather-block { display: flex; align-items: center; gap: 14px; }
@@ -72,6 +73,7 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
   .weather-info { font-size: 8px; line-height: 1.4; }
   .topbar { padding: 8px 12px; }
   .logo { font-size: 15px; }
+  .logo-address { font-size: 8px; }
   .controls { gap: 4px; }
   .ctrl-btn { width: 26px; height: 26px; font-size: 10px; }
   .ctrl-label { font-size: 6px; }
@@ -136,11 +138,16 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 .video-change-btn { position: absolute; top: 6px; right: 6px; background: rgba(14,15,15,0.75); backdrop-filter: blur(6px); color: var(--text); font-size: 9px; padding: 4px 10px; border-radius: 20px; cursor: pointer; z-index: 2; }
 .video-choose-btn { background: var(--accent2); color: #0e0f0f; border: none; border-radius: 10px; padding: 8px 18px; font-weight: bold; cursor: pointer; font-family: inherit; font-size: 12px; }
 .video-idle-text { font-size: 11px; color: var(--muted); text-align: center; }
-.security-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; width: 100%; box-sizing: border-box; }
+.security-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; width: 100%; box-sizing: border-box; }
 .security-tile { background: var(--surface); border: 1px dashed var(--border); border-radius: 10px; padding: 14px 8px; text-align: center; }
 .security-tile-icon { width: 22px; height: 22px; margin: 0 auto 6px; color: var(--muted); stroke: var(--muted); fill: none; stroke-width: 2; display: block; }
 .security-tile-label { font-size: 10px; color: var(--text); margin-bottom: 2px; }
 .security-tile-status { font-size: 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.security-tile.live { position: relative; padding: 0; border-style: solid; border-color: var(--accent2); overflow: hidden; aspect-ratio: 4 / 3; }
+.security-tile.live img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.security-tile.live .security-tile-label { position: absolute; left: 6px; bottom: 4px; margin: 0; padding: 2px 8px; border-radius: 20px; background: rgba(14,15,15,0.65); backdrop-filter: blur(4px); color: #fff; font-size: 8px; z-index: 1; }
+.security-tile.live.feed-error img { display: none; }
+.security-tile.live.feed-error::after { content: 'Feed unavailable'; font-size: 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
 .music-widget { background: var(--surface2); border-radius: 12px; border: 1px solid var(--border); padding: 12px; display: flex; align-items: center; gap: 12px; margin-top: 10px; }
 .music-art { width: 42px; height: 42px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
 .music-info { flex: 1; min-width: 0; }
@@ -256,7 +263,10 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
 
 <div class="app">
   <div class="topbar">
-    <div class="logo">kitchen<span>.hub</span></div>
+    <div>
+      <div class="logo">kitchen<span>.hub</span></div>
+      <div class="logo-address">kitchen.local</div>
+    </div>
     <div>
       <div class="clock" id="clock">--:--</div>
       <div class="datestr" id="datestr">--</div>
@@ -1263,6 +1273,23 @@ function openSecurity() {
   if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
+const SECURITY_CAMERAS = [
+  { id: 'front_view',  label: 'Front View', src: '/camera/front_view/' },
+  { id: 'backyard',    label: 'Backyard',   src: '/camera/backyard/' },
+  { id: 'front_door',  label: 'Front Door', src: null } // reserved for Nest Hello -- separate future phase
+];
+const SECURITY_CAMERA_ICON = `<svg class="security-tile-icon" viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`;
+
+function securityTileHTML(cam) {
+  if (!cam.src) {
+    return `<div class="security-tile">${SECURITY_CAMERA_ICON}<div class="security-tile-label">${cam.label}</div><div class="security-tile-status">Not connected</div></div>`;
+  }
+  return `<div class="security-tile live" id="security-tile-${cam.id}">
+    <img src="${cam.src}" alt="${cam.label} camera" draggable="false" onerror="document.getElementById('security-tile-${cam.id}').classList.add('feed-error')">
+    <div class="security-tile-label">${cam.label}</div>
+  </div>`;
+}
+
 function renderVideoPanel() {
   const body = document.getElementById('video-panel-body');
   if (!body) return;
@@ -1273,11 +1300,7 @@ function renderVideoPanel() {
       body.innerHTML = '<div class="video-idle-text">No video selected</div><div class="video-choose-btn" onclick="chooseYouTubeVideo()">Choose YouTube Video</div>';
     }
   } else {
-    // Placeholder only -- no camera hardware integrated yet.
-    body.innerHTML = `<div class="security-grid">
-      <div class="security-tile"><svg class="security-tile-icon" viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg><div class="security-tile-label">Front Door</div><div class="security-tile-status">Not connected</div></div>
-      <div class="security-tile"><svg class="security-tile-icon" viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg><div class="security-tile-label">Driveway</div><div class="security-tile-status">Not connected</div></div>
-    </div>`;
+    body.innerHTML = `<div class="security-grid">${SECURITY_CAMERAS.map(securityTileHTML).join('')}</div>`;
   }
 }
 
@@ -1404,7 +1427,12 @@ function checkInactivity() {
   if (sleepMode) return;
   if (Date.now() - lastActivityTime > INACTIVITY_SLEEP_MS) enterSleep('inactivity');
 }
-setInterval(checkInactivity, 30000);
+// Inactivity trigger disabled 2026-09-01 -- diagnostic step to rule it out as a cause of the
+// intermittent WiFi disconnects, even though enterSleep() itself only touches the DOM (display:none
+// + a CSS overlay) and has no code path that could plausibly reach the network stack. Temperature
+// and manual sleep triggers are untouched. Re-enable by restoring this line if disconnects persist
+// with inactivity sleep off, which would confirm it's unrelated.
+// setInterval(checkInactivity, 30000);
 
 async function checkTempForSleep() {
   if (sleepMode) return;

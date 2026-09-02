@@ -13,6 +13,7 @@ Everything runs locally — no cloud dependency for the core features, no subscr
 - **Emergency Food** — a dedicated view for already-prepared, grab-and-go items (the kind of thing you eat when you're too tired to cook), tagged directly in Grocy
 - **Voice commands** — a local [faster-whisper](https://github.com/SYSTRAN/faster-whisper) transcription server turns spoken commands like *"I used two eggs"* or *"add milk to the shopping list"* into real Grocy API calls, entirely on-device, no cloud speech API
 - **Voice-driven YouTube search** — *"play lofi hip hop on youtube"* finds and embeds the top result inline
+- **Live security camera feeds** — real-time video from WiFi cameras around the house, routed through Home Assistant and proxied server-side so no credentials ever touch the browser
 - **Live weather, calendar, and local flyer deals** (via a small Flask proxy service)
 - **Cooking timers** — multiple concurrent timers, persisted across reloads, alert on completion even while the screen is asleep
 - **Sleep mode** — the screen goes dark on inactivity, high CPU temperature, or a manual tap, dropping CPU load and heat when nobody's in the kitchen
@@ -65,6 +66,7 @@ A few things that came up building this that might be useful if you're doing som
 - **Drag vs. tap disambiguation**: distinguishing a drag gesture from a tap on the same element is straightforward; suppressing the resulting spurious `click` event afterward is not. A capture-phase listener has to live on an *ancestor* element to reliably fire before the target's own `onclick` — same-element listeners fire in registration order regardless of the capture flag.
 - **Chromium kiosk reliability on Raspberry Pi OS**: a Debian workaround flag (`--js-flags=--no-decommit-pooled-pages`, injected automatically by `rpi-chromium-mods` for ARM low-memory devices) silently stopped being recognized after a Chromium point release — the browser process stayed alive and DevTools reported the correct URL, but no page ever actually rendered. The fix is passing an empty `--js-flags=` to override it, but diagnosing "the browser is running but nothing is happening" took directly inspecting the live process tree for renderer/GPU child processes rather than trusting any single status signal.
 - **DHCP/IP drift**: never hardcode a LAN IP for inter-service routing — a router reboot silently breaks everything downstream. Docker services route to each other by service name; host-level services route via `host.docker.internal`.
+- **Authenticated video in a plain `<img>` tag**: live security camera feeds come from Home Assistant's camera proxy, which requires a bearer token — but a plain `<img src="...">` can't attach custom headers. Rather than exposing the token client-side (a real risk once the dashboard's source is public), nginx injects the `Authorization` header server-side on a dedicated proxy route per camera. The browser only ever requests a same-origin URL; it never sees the credential that makes the request work.
 
 ## Setup
 
