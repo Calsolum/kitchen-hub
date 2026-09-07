@@ -14,6 +14,7 @@ Everything runs locally — no cloud dependency for the core features, no subscr
 - **Voice commands** — a local [faster-whisper](https://github.com/SYSTRAN/faster-whisper) transcription server turns spoken commands like *"I used two eggs"* or *"add milk to the shopping list"* into real Grocy API calls, entirely on-device, no cloud speech API
 - **Voice-driven YouTube search** — *"play lofi hip hop on youtube"* finds and embeds the top result inline
 - **Live security camera feeds** — real-time video from WiFi cameras around the house, routed through Home Assistant and proxied server-side so no credentials ever touch the browser
+- **Physical label printing** — a Bluetooth LE label printer (Niimbot B1-Pro) wired up as its own Flask service; print a Grocy-linked product label (name + soonest expiry, pulled live from stock) or a free-form text label, straight from the dashboard
 - **Live weather, calendar, and local flyer deals** (via a small Flask proxy service)
 - **Cooking timers** — multiple concurrent timers, persisted across reloads, alert on completion even while the screen is asleep
 - **Sleep mode** — the screen goes dark on inactivity, high CPU temperature, or a manual tap, dropping CPU load and heat when nobody's in the kitchen
@@ -32,12 +33,14 @@ Everything runs locally — no cloud dependency for the core features, no subscr
 │                                  ├── /dashboard/  → dashboard   │
 │                                  ├── /mealie/     → Mealie      │
 │                                  ├── /whisper/    → whisper svc │
-│                                  └── /calendar/   → calendar svc│
+│                                  ├── /calendar/   → calendar svc│
+│                                  └── /label/      → label svc   │
 │                                                                │
 │  Docker Compose:  grocy · mealie · whisper (faster-whisper)   │
 │                    home-assistant                              │
 │  Host systemd:     dashboard (static file server)              │
 │                     calendar_server.py (Flask: Calendar+Flipp) │
+│                     label_server.py (Flask → NiimPrintX → BLE) │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -52,6 +55,7 @@ The dashboard itself is a single self-contained `dashboard.html` — no build st
 | Recipes | [Mealie](https://mealie.io/) |
 | Voice transcription | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (local, CPU) |
 | Calendar + deals proxy | Flask |
+| Label printing | Flask + [NiimPrintX](https://github.com/labbots/NiimPrintX) (patched) over Bluetooth LE |
 | Reverse proxy / TLS | nginx |
 | Orchestration | Docker Compose (services) + systemd (host processes) |
 | Kiosk | Chromium in kiosk mode on native Wayland (`labwc`) |
@@ -67,6 +71,7 @@ A few things that came up building this that might be useful if you're doing som
 - **Chromium kiosk reliability on Raspberry Pi OS**: a Debian workaround flag (`--js-flags=--no-decommit-pooled-pages`, injected automatically by `rpi-chromium-mods` for ARM low-memory devices) silently stopped being recognized after a Chromium point release — the browser process stayed alive and DevTools reported the correct URL, but no page ever actually rendered. The fix is passing an empty `--js-flags=` to override it, but diagnosing "the browser is running but nothing is happening" took directly inspecting the live process tree for renderer/GPU child processes rather than trusting any single status signal.
 - **DHCP/IP drift**: never hardcode a LAN IP for inter-service routing — a router reboot silently breaks everything downstream. Docker services route to each other by service name; host-level services route via `host.docker.internal`.
 - **Authenticated video in a plain `<img>` tag**: live security camera feeds come from Home Assistant's camera proxy, which requires a bearer token — but a plain `<img src="...">` can't attach custom headers. Rather than exposing the token client-side (a real risk once the dashboard's source is public), nginx injects the `Authorization` header server-side on a dedicated proxy route per camera. The browser only ever requests a same-origin URL; it never sees the credential that makes the request work.
+- **Reverse-engineering a label printer with no official SDK**: the Niimbot B1-Pro has no public protocol docs, only a community-maintained reference (niimbluelib). Prints reported "completed" but came out physically blank — turned out to be two separate payload-format bugs in the third-party Python library this project builds on: `PrintStart` needs a model-specific 7-byte payload, and `SetPageSize` a 6-byte one, both undocumented outside the JS reference implementation. The final, sneakiest bug was in Bluetooth device discovery itself — the library's device-matching filter assumed the printer's BLE advertisement would carry zero service UUIDs, which was false for this unit's actual advertisement, so it silently rejected the one device it was scanning for. A raw BLE scan (bypassing the library entirely) was what exposed that the printer had been discoverable the whole time.
 
 ## Setup
 
@@ -78,6 +83,7 @@ This isn't a one-click deploy — it's tuned to specific hardware (a Raspberry P
 4. Point nginx at your own TLS cert (a self-signed one is fine for a LAN-only setup) and hostname.
 5. For voice commands to work, `EMERGENCY_FOOD_GROUP_ID` and the Grocy API key in `dashboard.html` need to match your own Grocy instance.
 6. Launch Chromium in kiosk mode pointed at your nginx host — see the comments in `dashboard.html` and the architecture diagram above for how the pieces fit together.
+7. Label printing (optional) needs a Niimbot BLE printer, [NiimPrintX](https://github.com/labbots/NiimPrintX) cloned locally, and `label_server.py`'s own Grocy API key filled in. NiimPrintX's upstream `bluetooth.py` and `printer.py` needed several fixes for this printer model — see the reverse-engineering note above — so expect to patch a fresh clone rather than using it as-is.
 
 ## License
 

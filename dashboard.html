@@ -352,6 +352,10 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
           <div class="action-label">Emergency Food</div>
           <div class="action-sub">Grab &amp; go</div>
         </div>
+        <div class="action-btn" onclick="openFocus('label')">
+          <div class="action-label">Print Label</div>
+          <div class="action-sub">Niimbot label maker</div>
+        </div>
       </div>
     </div>
     <div class="card" onclick="openFocus('flipp')">
@@ -412,11 +416,11 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
 </div>
 
 <script>
-const GROCY_KEY = "YOUR_GROCY_API_KEY"; // Grocy > Settings > API keys
+const GROCY_KEY = "YOUR_GROCY_API_KEY";
 const GROCY_URL = "";
 const EMERGENCY_FOOD_GROUP_ID = 13; // Grocy product group "Emergency Food" -- ready-to-eat grab-and-go items
 const GROCY_HEADERS = { 'GROCY-API-KEY': GROCY_KEY };
-const MEALIE_TOKEN = "YOUR_MEALIE_API_TOKEN"; // Mealie > User menu > API Tokens
+const MEALIE_TOKEN = "YOUR_MEALIE_API_TOKEN";
 const MEALIE_URL = "/mealie";
 const CALORIE_LIMIT = 2000;
 const ICON_MIC = '<svg viewBox="0 0 24 24" class="icon icon-inline" style="width:0.75em;height:0.75em;"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
@@ -676,10 +680,59 @@ async function loadFullStock() {
         const amount = parseFloat(item.amount)||0;
         const minStock = parseFloat(product.min_stock_amount)||0;
         const badgeClass = amount===0?'out':amount<=minStock?'low':'ok';
-        return `<div class="stock-item"><span class="stock-name">${product.name||'Unknown'}</span><span class="stock-badge ${badgeClass}">${amount===0?'OUT':amount+' pcs'}</span></div>`;
+        return `<div class="stock-item"><span class="stock-name">${product.name||'Unknown'}</span><span class="stock-badge ${badgeClass}">${amount===0?'OUT':amount+' pcs'}</span><button onclick="event.stopPropagation();printProductLabel(${item.product_id},this)" title="Print label" style="margin-left:8px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:13px;padding:3px 7px;cursor:pointer;">🖨</button></div>`;
       }).join('')}`;
   } catch(e) {
     document.getElementById('focus-inner').innerHTML = '<div class="focus-title">Stock</div><div class="loading">Could not load</div>';
+  }
+}
+
+async function printProductLabel(id, btnEl) {
+  const original = btnEl.textContent;
+  btnEl.textContent = '...';
+  btnEl.disabled = true;
+  try {
+    const res = await fetch(`/label/print/product/${id}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({quantity:1}) });
+    const data = await res.json();
+    btnEl.textContent = data.success ? '✓' : '✗';
+    if (!data.success) console.log('Print failed:', data.error || data.log);
+  } catch(e) {
+    btnEl.textContent = '✗';
+  }
+  setTimeout(() => { btnEl.textContent = original; btnEl.disabled = false; }, 2500);
+}
+
+function loadLabelPrinter() {
+  document.getElementById('focus-inner').innerHTML = `
+    <div class="focus-title">Print Label</div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">Prints a 50×30mm label on the Niimbot printer near the fridge. Make sure it's awake (tap the power button).</p>
+    <input id="label-line1" type="text" placeholder="Line 1 (bold)" maxlength="30" style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14px;">
+    <input id="label-line2" type="text" placeholder="Line 2 (optional)" maxlength="30" style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;">
+    <input id="label-line3" type="text" placeholder="Line 3 (optional)" maxlength="30" style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:14px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+      <label style="font-size:12px;color:var(--muted);">Quantity</label>
+      <input id="label-quantity" type="number" min="1" max="10" value="1" style="width:60px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;">
+    </div>
+    <button onclick="submitLabelPrint()" style="width:100%;padding:12px;border-radius:10px;border:none;background:var(--accent);color:#000;font-size:14px;font-weight:bold;cursor:pointer;">Print Label</button>
+    <div id="label-status" style="font-size:12px;color:var(--muted);margin-top:12px;"></div>`;
+}
+
+async function submitLabelPrint() {
+  const lines = [
+    document.getElementById('label-line1').value,
+    document.getElementById('label-line2').value,
+    document.getElementById('label-line3').value,
+  ].map(s => s.trim()).filter(Boolean);
+  const quantity = parseInt(document.getElementById('label-quantity').value) || 1;
+  const status = document.getElementById('label-status');
+  if (lines.length === 0) { status.textContent = 'Enter at least one line of text.'; return; }
+  status.textContent = 'Printing... (make sure the printer is awake)';
+  try {
+    const res = await fetch('/label/print/text', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({lines, quantity}) });
+    const data = await res.json();
+    status.textContent = data.success ? 'Printed!' : ('Failed: ' + (data.error || data.log || 'unknown error'));
+  } catch(e) {
+    status.textContent = 'Could not reach the label printer service.';
   }
 }
 
@@ -731,6 +784,7 @@ function openFocus(type) {
   else if (type==='meals') document.getElementById('focus-inner').innerHTML = '<div class="focus-title">Meal Plan</div><div style="font-size:12px;color:var(--muted);">Add meals in Grocy under Meal Plan.</div>';
   else if (type==='timer') loadTimer();
   else if (type==='emergency') loadEmergencyFoodFocus();
+  else if (type==='label') loadLabelPrinter();
 }
 
 const FLIPP_POSTAL = "L6P1A1"; // Update with your postal code
@@ -998,7 +1052,7 @@ function rotatePhoto() {
 }
 setInterval(rotatePhoto, 1800000);
 
-const WEATHER_KEY = "YOUR_OPENWEATHERMAP_API_KEY"; // https://openweathermap.org/api
+const WEATHER_KEY = "YOUR_OPENWEATHERMAP_API_KEY";
 const WEATHER_LAT = "43.7315";
 const WEATHER_LON = "-79.7624";
 
