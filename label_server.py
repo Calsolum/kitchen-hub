@@ -89,26 +89,55 @@ def _set_job(job_id, **kwargs):
             JOBS[job_id].update(kwargs)
 
 
+NIIMBOT_ADDR_CACHE = os.path.expanduser("~/.niimbot_last_address")
+
+
+async def _connect_with_retry(job_id, max_attempts=3):
+    # Right after a Pi reboot, BlueZ's D-Bus service can be slow to fully
+    # settle -- the very first connect attempt can time out even though the
+    # printer was found fine, and a retry moments later just works. Clear the
+    # cached address on failure too, in case a stale cached address (rather
+    # than boot timing) is what's actually wrong.
+    last_exc = RuntimeError("Failed to connect to the printer")
+    for attempt in range(1, max_attempts + 1):
+        try:
+            _set_job(job_id, phase="scanning")
+            device = await find_device("b1")
+            _set_job(job_id, phase="connecting")
+            printer = PrinterClient(device)
+            if await printer.connect():
+                return printer
+        except Exception as e:
+            last_exc = e
+        try:
+            os.remove(NIIMBOT_ADDR_CACHE)
+        except OSError:
+            pass
+        if attempt < max_attempts:
+            await asyncio.sleep(2)
+    raise last_exc
+
+
 async def _run_print(job_id, img, quantity):
     printer = None
     try:
-        _set_job(job_id, phase="scanning")
-        device = await find_device("b1")
-        _set_job(job_id, phase="connecting")
-        printer = PrinterClient(device)
-        if not await printer.connect():
-            raise RuntimeError("Failed to connect to the printer")
+        printer = await _connect_with_retry(job_id)
         _set_job(job_id, phase="printing", current=0, total=img.height)
 
         def progress_cb(current, total):
             _set_job(job_id, current=current, total=total)
 
         await printer.print_image(img, quantity=quantity, progress_cb=progress_cb)
-        await printer.disconnect()
+        # The label is on paper by this point -- disconnecting is just BLE
+        # session cleanup, and this D-Bus call has been seen to fail with the
+        # same post-reboot flakiness as connect(). A disconnect failure isn't
+        # a print failure, so it's handled in `finally` and never flips
+        # success to False.
         _set_job(job_id, phase="done", done=True, success=True)
     except Exception as e:
         detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__} (no message)\n{traceback.format_exc()}"
         _set_job(job_id, phase="failed", done=True, success=False, error=detail)
+    finally:
         if printer is not None:
             try:
                 await printer.disconnect()
