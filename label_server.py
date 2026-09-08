@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
+import sys
+import os
+import time
+import uuid
+import asyncio
+import threading
+import traceback
+
 from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont
-import subprocess
 import requests
-import time
-import os
 import urllib3
+
+NIIMPRINTX_DIR = "/home/kitchenpi/NiimPrintX"
+sys.path.insert(0, NIIMPRINTX_DIR)
+from NiimPrintX.nimmy.bluetooth import find_device
+from NiimPrintX.nimmy.printer import PrinterClient
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -13,7 +23,6 @@ app = Flask(__name__)
 
 GROCY_URL = "https://localhost"
 GROCY_KEY = "YOUR_GROCY_API_KEY"
-NIIMPRINTX_DIR = "/home/kitchenpi/NiimPrintX"
 
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
@@ -66,26 +75,60 @@ def render_label(title, subtitle=None, extra_lines=None):
     return img
 
 
-def do_print(img, quantity=1):
-    ts = int(time.time() * 1000)
-    path = f"/tmp/label_{ts}.png"
-    img.save(path)
+# --- Print jobs run in a background thread against NiimPrintX's own asyncio
+# API (rather than shelling out to its CLI), so a POST /print/* returns
+# immediately with a job id and the dashboard can poll /print/status/<id> for
+# real phase + per-row progress instead of just waiting on one long request.
+JOBS = {}
+JOBS_LOCK = threading.Lock()
+
+
+def _set_job(job_id, **kwargs):
+    with JOBS_LOCK:
+        if job_id in JOBS:
+            JOBS[job_id].update(kwargs)
+
+
+async def _run_print(job_id, img, quantity):
+    printer = None
     try:
-        result = subprocess.run(
-            ["python3", "-m", "NiimPrintX.cli", "print", "-m", "b1", "-i", path, "-n", str(quantity)],
-            cwd=NIIMPRINTX_DIR,
-            capture_output=True, text=True, timeout=90,
-        )
-        output = (result.stdout or "") + (result.stderr or "")
-        ok = "print job completed" in output.lower()
-        return ok, output.strip()
-    except subprocess.TimeoutExpired:
-        return False, "Timed out waiting for the printer (is it awake?)"
-    finally:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+        _set_job(job_id, phase="scanning")
+        device = await find_device("b1")
+        _set_job(job_id, phase="connecting")
+        printer = PrinterClient(device)
+        if not await printer.connect():
+            raise RuntimeError("Failed to connect to the printer")
+        _set_job(job_id, phase="printing", current=0, total=img.height)
+
+        def progress_cb(current, total):
+            _set_job(job_id, current=current, total=total)
+
+        await printer.print_image(img, quantity=quantity, progress_cb=progress_cb)
+        await printer.disconnect()
+        _set_job(job_id, phase="done", done=True, success=True)
+    except Exception as e:
+        detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__} (no message)\n{traceback.format_exc()}"
+        _set_job(job_id, phase="failed", done=True, success=False, error=detail)
+        if printer is not None:
+            try:
+                await printer.disconnect()
+            except Exception:
+                pass
+
+
+def start_print_job(img, quantity):
+    job_id = uuid.uuid4().hex[:12]
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            "phase": "queued", "current": 0, "total": 0,
+            "done": False, "success": None, "error": None,
+        }
+
+    def runner():
+        asyncio.run(_run_print(job_id, img, quantity))
+
+    threading.Thread(target=runner, daemon=True).start()
+    return job_id
 
 
 @app.route('/print/text', methods=['POST'])
@@ -98,8 +141,8 @@ def print_text():
     if len(lines) > 4:
         return jsonify(success=False, error="Max 4 lines"), 400
     img = render_label(lines[0], extra_lines=lines[1:])
-    ok, log = do_print(img, quantity=quantity)
-    return jsonify(success=ok, log=log)
+    job_id = start_print_job(img, quantity)
+    return jsonify(job_id=job_id)
 
 
 @app.route('/print/product/<int:product_id>', methods=['POST'])
@@ -118,8 +161,17 @@ def print_product(product_id):
 
     subtitle = f"Exp: {best_before}" if best_before else None
     img = render_label(name, subtitle=subtitle)
-    ok, log = do_print(img, quantity=quantity)
-    return jsonify(success=ok, log=log)
+    job_id = start_print_job(img, quantity)
+    return jsonify(job_id=job_id)
+
+
+@app.route('/print/status/<job_id>')
+def print_status(job_id):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if not job:
+        return jsonify(error="unknown job"), 404
+    return jsonify(job)
 
 
 @app.route('/status')
@@ -128,4 +180,4 @@ def status():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=9300)
+    app.run(host='0.0.0.0', port=9300, threaded=True)
