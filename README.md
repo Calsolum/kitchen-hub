@@ -14,7 +14,7 @@ Everything runs locally — no cloud dependency for the core features, no subscr
 - **Voice commands** — a local [faster-whisper](https://github.com/SYSTRAN/faster-whisper) transcription server turns spoken commands like *"I used two eggs"* or *"add milk to the shopping list"* into real Grocy API calls, entirely on-device, no cloud speech API
 - **Voice-driven YouTube search** — *"play lofi hip hop on youtube"* finds and embeds the top result inline
 - **Live security camera feeds** — real-time video from WiFi cameras around the house, routed through Home Assistant and proxied server-side so no credentials ever touch the browser
-- **Physical label printing** — a Bluetooth LE label printer (Niimbot B1-Pro) wired up as its own Flask service; print a Grocy-linked product label (name + soonest expiry, pulled live from stock) or a free-form text label, straight from the dashboard, with a live progress bar and a built-in on-screen keyboard (the kiosk has no physical one)
+- **Physical label printing** — a Bluetooth LE label printer (Niimbot B1-Pro) wired up as its own Flask service; print a Grocy-linked product label (name + soonest expiry, pulled live from stock) or a free-form text label, straight from the dashboard, with a live progress bar, one-tap "purchased/opened today" date presets, and a built-in on-screen keyboard (the kiosk has no physical one)
 - **Live weather, calendar, and local flyer deals** (via a small Flask proxy service)
 - **Cooking timers** — multiple concurrent timers, persisted across reloads, alert on completion even while the screen is asleep
 - **Sleep mode** — the screen goes dark on inactivity, high CPU temperature, or a manual tap, dropping CPU load and heat when nobody's in the kitchen

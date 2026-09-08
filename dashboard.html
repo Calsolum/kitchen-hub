@@ -785,7 +785,11 @@ function loadLabelPrinter() {
   document.getElementById('focus-inner').innerHTML = `
     <div class="focus-title">Print Label</div>
     <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">Prints a 50×30mm label on the Niimbot printer near the fridge. Make sure it's awake (tap the power button).</p>
-    <input id="label-line1" type="text" placeholder="Line 1 (bold)" maxlength="30" style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14px;">
+    <input id="label-line1" type="text" placeholder="Item name (bold)" maxlength="30" style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14px;">
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button onclick="fillLabelPreset('Purchased')" style="flex:1;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer;">Purchased today</button>
+      <button onclick="fillLabelPreset('Opened')" style="flex:1;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer;">Opened today</button>
+    </div>
     <input id="label-line2" type="text" placeholder="Line 2 (optional)" maxlength="30" style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;">
     <input id="label-line3" type="text" placeholder="Line 3 (optional)" maxlength="30" style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:14px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;">
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
@@ -802,6 +806,21 @@ function loadLabelPrinter() {
     </div>
     <div id="label-status" style="font-size:12px;color:var(--muted);margin-top:12px;"></div>`;
   ['label-line1','label-line2','label-line3'].forEach(id => oskAttach(document.getElementById(id)));
+}
+
+function ordinal(n) {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function formatLabelDate(d) {
+  return `${ordinal(d.getDate())} ${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getFullYear()}`;
+}
+
+function fillLabelPreset(action) {
+  document.getElementById('label-line2').value = `${action} on ${formatLabelDate(new Date())}`;
+  const line1 = document.getElementById('label-line1');
+  if (!line1.value) line1.focus();
 }
 
 function adjustLabelQty(delta) {
