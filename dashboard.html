@@ -235,6 +235,13 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 body.night-mode #bg-photo::after { opacity: 0.92; }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+#osk { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2000; background: var(--surface); backdrop-filter: blur(18px); border-top: 1px solid var(--border); padding: 10px 8px; display: none; }
+#osk.active { display: block; }
+.osk-row { display: flex; justify-content: center; gap: 5px; margin-bottom: 6px; }
+.osk-key { flex: 1; max-width: 42px; height: 42px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 15px; display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; }
+.osk-key.wide { max-width: 64px; font-size: 12px; }
+.osk-key.space { max-width: 240px; flex: 4; }
+.osk-key:active, .osk-key.active { background: var(--accent); color: #000; }
 </style>
 </head>
 <body>
@@ -258,6 +265,24 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
       <div class="wave-bar"></div>
     </div>
     <div style="font-size:13px;color:var(--accent);margin-bottom:16px;font-weight:bold;">TAP ANYWHERE TO STOP</div>
+  </div>
+</div>
+
+<div id="osk">
+  <div class="osk-row">
+    <div class="osk-key" onclick="oskPress('1')">1</div><div class="osk-key" onclick="oskPress('2')">2</div><div class="osk-key" onclick="oskPress('3')">3</div><div class="osk-key" onclick="oskPress('4')">4</div><div class="osk-key" onclick="oskPress('5')">5</div><div class="osk-key" onclick="oskPress('6')">6</div><div class="osk-key" onclick="oskPress('7')">7</div><div class="osk-key" onclick="oskPress('8')">8</div><div class="osk-key" onclick="oskPress('9')">9</div><div class="osk-key" onclick="oskPress('0')">0</div>
+  </div>
+  <div class="osk-row">
+    <div class="osk-key" data-letter onclick="oskPress('q')">q</div><div class="osk-key" data-letter onclick="oskPress('w')">w</div><div class="osk-key" data-letter onclick="oskPress('e')">e</div><div class="osk-key" data-letter onclick="oskPress('r')">r</div><div class="osk-key" data-letter onclick="oskPress('t')">t</div><div class="osk-key" data-letter onclick="oskPress('y')">y</div><div class="osk-key" data-letter onclick="oskPress('u')">u</div><div class="osk-key" data-letter onclick="oskPress('i')">i</div><div class="osk-key" data-letter onclick="oskPress('o')">o</div><div class="osk-key" data-letter onclick="oskPress('p')">p</div>
+  </div>
+  <div class="osk-row">
+    <div class="osk-key" data-letter onclick="oskPress('a')">a</div><div class="osk-key" data-letter onclick="oskPress('s')">s</div><div class="osk-key" data-letter onclick="oskPress('d')">d</div><div class="osk-key" data-letter onclick="oskPress('f')">f</div><div class="osk-key" data-letter onclick="oskPress('g')">g</div><div class="osk-key" data-letter onclick="oskPress('h')">h</div><div class="osk-key" data-letter onclick="oskPress('j')">j</div><div class="osk-key" data-letter onclick="oskPress('k')">k</div><div class="osk-key" data-letter onclick="oskPress('l')">l</div>
+  </div>
+  <div class="osk-row">
+    <div class="osk-key wide" id="osk-shift-key" onclick="oskShift()">&#8679;</div><div class="osk-key" data-letter onclick="oskPress('z')">z</div><div class="osk-key" data-letter onclick="oskPress('x')">x</div><div class="osk-key" data-letter onclick="oskPress('c')">c</div><div class="osk-key" data-letter onclick="oskPress('v')">v</div><div class="osk-key" data-letter onclick="oskPress('b')">b</div><div class="osk-key" data-letter onclick="oskPress('n')">n</div><div class="osk-key" data-letter onclick="oskPress('m')">m</div><div class="osk-key wide" onclick="oskBackspace()">&#9003;</div>
+  </div>
+  <div class="osk-row">
+    <div class="osk-key space" onclick="oskPress(' ')">space</div><div class="osk-key wide" onclick="oskDone()">Done</div>
   </div>
 </div>
 
@@ -703,18 +728,29 @@ async function printProductLabel(id, btnEl) {
 }
 
 function loadLabelPrinter() {
+  labelQty = 1;
   document.getElementById('focus-inner').innerHTML = `
     <div class="focus-title">Print Label</div>
     <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">Prints a 50×30mm label on the Niimbot printer near the fridge. Make sure it's awake (tap the power button).</p>
     <input id="label-line1" type="text" placeholder="Line 1 (bold)" maxlength="30" style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14px;">
     <input id="label-line2" type="text" placeholder="Line 2 (optional)" maxlength="30" style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;">
     <input id="label-line3" type="text" placeholder="Line 3 (optional)" maxlength="30" style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:14px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
       <label style="font-size:12px;color:var(--muted);">Quantity</label>
-      <input id="label-quantity" type="number" min="1" max="10" value="1" style="width:60px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button onclick="adjustLabelQty(-1)" style="width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:18px;cursor:pointer;">−</button>
+        <span id="label-quantity" style="min-width:20px;text-align:center;font-size:15px;">1</span>
+        <button onclick="adjustLabelQty(1)" style="width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:18px;cursor:pointer;">+</button>
+      </div>
     </div>
     <button onclick="submitLabelPrint()" style="width:100%;padding:12px;border-radius:10px;border:none;background:var(--accent);color:#000;font-size:14px;font-weight:bold;cursor:pointer;">Print Label</button>
     <div id="label-status" style="font-size:12px;color:var(--muted);margin-top:12px;"></div>`;
+  ['label-line1','label-line2','label-line3'].forEach(id => oskAttach(document.getElementById(id)));
+}
+
+function adjustLabelQty(delta) {
+  labelQty = Math.min(10, Math.max(1, labelQty + delta));
+  document.getElementById('label-quantity').textContent = labelQty;
 }
 
 async function submitLabelPrint() {
@@ -723,7 +759,7 @@ async function submitLabelPrint() {
     document.getElementById('label-line2').value,
     document.getElementById('label-line3').value,
   ].map(s => s.trim()).filter(Boolean);
-  const quantity = parseInt(document.getElementById('label-quantity').value) || 1;
+  const quantity = labelQty;
   const status = document.getElementById('label-status');
   if (lines.length === 0) { status.textContent = 'Enter at least one line of text.'; return; }
   status.textContent = 'Printing... (make sure the printer is awake)';
@@ -955,12 +991,42 @@ async function loadVoiceHistory() {
   }
 }
 
-function closeFocus() { document.getElementById('focus-overlay').classList.remove('active'); }
+function closeFocus() { document.getElementById('focus-overlay').classList.remove('active'); document.getElementById('osk').classList.remove('active'); oskTarget = null; }
 document.getElementById('focus-overlay').addEventListener('click', function(e) { if (e.target===this) closeFocus(); });
 let mediaRecorder = null;
 let audioChunks = [];
 let isRecording = false;
 let micStream = null;
+
+let oskTarget = null;
+let oskCaps = false;
+let labelQty = 1;
+
+function oskAttach(el) {
+  el.addEventListener('focus', () => { oskTarget = el; document.getElementById('osk').classList.add('active'); });
+}
+function oskPress(ch) {
+  if (!oskTarget) return;
+  oskTarget.value += oskCaps ? ch.toUpperCase() : ch;
+  oskTarget.dispatchEvent(new Event('input', {bubbles:true}));
+}
+function oskBackspace() {
+  if (!oskTarget) return;
+  oskTarget.value = oskTarget.value.slice(0, -1);
+  oskTarget.dispatchEvent(new Event('input', {bubbles:true}));
+}
+function oskShift() {
+  oskCaps = !oskCaps;
+  document.querySelectorAll('.osk-key[data-letter]').forEach(k => {
+    k.textContent = oskCaps ? k.textContent.toUpperCase() : k.textContent.toLowerCase();
+  });
+  document.getElementById('osk-shift-key').classList.toggle('active', oskCaps);
+}
+function oskDone() {
+  document.getElementById('osk').classList.remove('active');
+  if (oskTarget) oskTarget.blur();
+  oskTarget = null;
+}
 
 // Pre-initialize microphone on page load to eliminate lag
 async function preinitMic() {
