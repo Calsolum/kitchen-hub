@@ -47,27 +47,45 @@ def _wrap(draw, text, font, max_width):
     return lines
 
 
-# Largest-first title sizes to try when auto-fitting content to the label;
-# subtitle/extra lines scale proportionally. A short label (most of them --
-# an item name and a date) should fill the sticker, not sit in the middle of
-# a sea of white space at a fixed small size.
+# Largest-first sizes to try when auto-fitting content to the label. A short
+# label (most of them -- an item name and a date) should fill the sticker,
+# not sit in the middle of a sea of white space at a fixed small size.
 FONT_TIERS = [64, 56, 48, 42, 36, 30]
-SUBTITLE_RATIO = 0.6
 
 
-def _label_blocks(draw, title, subtitle, extra_lines, title_size):
-    font_title = ImageFont.truetype(FONT_BOLD, title_size)
-    font_sub = ImageFont.truetype(FONT_REGULAR, max(16, int(title_size * SUBTITLE_RATIO)))
-    max_w = LABEL_W - MARGIN * 2
+def _lines_fit(draw, lines, font, max_w):
+    return all(draw.textlength(t, font=font) <= max_w for t in lines)
 
-    blocks = [(line, font_title) for line in _wrap(draw, title, font_title, max_w)[:3]]
-    for line in (extra_lines or []):
-        blocks += [(w, font_sub) for w in _wrap(draw, line, font_sub, max_w)]
-    if subtitle:
-        blocks += [(w, font_sub) for w in _wrap(draw, subtitle, font_sub, max_w)]
 
-    heights = [draw.textbbox((0, 0), t, font=f)[3] - draw.textbbox((0, 0), t, font=f)[1] + 12 for t, f in blocks]
-    return blocks, heights
+def _block_height(draw, text, font):
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[3] - bbox[1] + 12
+
+
+def _best_fit(draw, texts, font_path, max_w, max_h):
+    """Largest tier whose wrapped lines all fit max_w and whose total height
+    fits max_h; falls back to the smallest tier (and however it wraps) if
+    nothing fits both, so there's always something to draw."""
+    lines, size = None, FONT_TIERS[-1]
+    for candidate in FONT_TIERS:
+        font = ImageFont.truetype(font_path, candidate)
+        wrapped = []
+        for text in texts:
+            wrapped.extend(_wrap(draw, text, font, max_w))
+        if not _lines_fit(draw, wrapped, font, max_w):
+            continue
+        heights = [_block_height(draw, t, font) for t in wrapped]
+        if sum(heights) <= max_h:
+            lines, size = wrapped, candidate
+            break
+    if lines is None:
+        font = ImageFont.truetype(font_path, size)
+        lines = []
+        for text in texts:
+            lines.extend(_wrap(draw, text, font, max_w))
+    font = ImageFont.truetype(font_path, size)
+    heights = [_block_height(draw, t, font) for t in lines]
+    return lines, font, heights
 
 
 def render_label(title, subtitle=None, extra_lines=None):
@@ -76,17 +94,24 @@ def render_label(title, subtitle=None, extra_lines=None):
     max_h = LABEL_H - MARGIN * 2
     max_w = LABEL_W - MARGIN * 2
 
-    blocks, heights = _label_blocks(draw, title, subtitle, extra_lines, FONT_TIERS[-1])
-    for size in FONT_TIERS:
-        candidate_blocks, candidate_heights = _label_blocks(draw, title, subtitle, extra_lines, size)
-        # _wrap() only breaks on word boundaries, so a single long word (e.g.
-        # "Japanese") can still come back wider than the label at a large
-        # size -- checking total height alone isn't enough, every line's
-        # actual rendered width has to fit too, or it just runs off the edge.
-        fits_width = all(draw.textlength(t, font=f) <= max_w for t, f in candidate_blocks)
-        if sum(candidate_heights) <= max_h and fits_width:
-            blocks, heights = candidate_blocks, candidate_heights
-            break
+    # Title and subtitle are sized independently rather than one scaling the
+    # other by a fixed ratio -- a single long, unsplittable word in the title
+    # (e.g. "Japanese") can cap how large the title is allowed to be, but
+    # that shouldn't also force short subtitle text down to a tiny size when
+    # the subtitle would happily fit much larger on its own.
+    title_lines, title_font, title_heights = _best_fit(draw, [title], FONT_BOLD, max_w, max_h)
+
+    sub_source = list(extra_lines or [])
+    if subtitle:
+        sub_source.append(subtitle)
+    if sub_source:
+        remaining_h = max(0, max_h - sum(title_heights))
+        sub_lines, sub_font, sub_heights = _best_fit(draw, sub_source, FONT_REGULAR, max_w, remaining_h)
+    else:
+        sub_lines, sub_font, sub_heights = [], None, []
+
+    blocks = [(t, title_font) for t in title_lines] + [(t, sub_font) for t in sub_lines]
+    heights = title_heights + sub_heights
 
     total_h = sum(heights)
     y = max(MARGIN, (LABEL_H - total_h) // 2)
@@ -289,6 +314,29 @@ def cancel_job(job_id):
 @app.route('/printer/status')
 def printer_status():
     return jsonify(connected=_is_connected(_printer))
+
+
+async def _manual_connect():
+    global _printer
+    async with _printer_lock:
+        if _is_connected(_printer):
+            return True
+        try:
+            _printer = await _connect_with_retry(None)
+            return True
+        except Exception:
+            _printer = None
+            return False
+
+
+@app.route('/printer/connect', methods=['POST'])
+def printer_connect():
+    future = asyncio.run_coroutine_threadsafe(_manual_connect(), _loop)
+    try:
+        connected = future.result(timeout=30)
+    except Exception:
+        connected = False
+    return jsonify(connected=connected)
 
 
 @app.route('/status')
