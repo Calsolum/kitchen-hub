@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import sys
 import os
+import io
+import base64
 import uuid
 import asyncio
 import threading
@@ -45,11 +47,17 @@ def _wrap(draw, text, font, max_width):
     return lines
 
 
-def render_label(title, subtitle=None, extra_lines=None):
-    img = Image.new("L", (LABEL_W, LABEL_H), 255)
-    draw = ImageDraw.Draw(img)
-    font_title = ImageFont.truetype(FONT_BOLD, 30)
-    font_sub = ImageFont.truetype(FONT_REGULAR, 22)
+# Largest-first title sizes to try when auto-fitting content to the label;
+# subtitle/extra lines scale proportionally. A short label (most of them --
+# an item name and a date) should fill the sticker, not sit in the middle of
+# a sea of white space at a fixed small size.
+FONT_TIERS = [64, 56, 48, 42, 36, 30]
+SUBTITLE_RATIO = 0.6
+
+
+def _label_blocks(draw, title, subtitle, extra_lines, title_size):
+    font_title = ImageFont.truetype(FONT_BOLD, title_size)
+    font_sub = ImageFont.truetype(FONT_REGULAR, max(16, int(title_size * SUBTITLE_RATIO)))
     max_w = LABEL_W - MARGIN * 2
 
     blocks = [(line, font_title) for line in _wrap(draw, title, font_title, max_w)[:3]]
@@ -58,10 +66,21 @@ def render_label(title, subtitle=None, extra_lines=None):
     if subtitle:
         blocks += [(w, font_sub) for w in _wrap(draw, subtitle, font_sub, max_w)]
 
-    heights = []
-    for text, font in blocks:
-        bbox = draw.textbbox((0, 0), text, font=font)
-        heights.append(bbox[3] - bbox[1] + 12)
+    heights = [draw.textbbox((0, 0), t, font=f)[3] - draw.textbbox((0, 0), t, font=f)[1] + 12 for t, f in blocks]
+    return blocks, heights
+
+
+def render_label(title, subtitle=None, extra_lines=None):
+    img = Image.new("L", (LABEL_W, LABEL_H), 255)
+    draw = ImageDraw.Draw(img)
+    max_h = LABEL_H - MARGIN * 2
+
+    blocks, heights = _label_blocks(draw, title, subtitle, extra_lines, FONT_TIERS[-1])
+    for size in FONT_TIERS:
+        candidate_blocks, candidate_heights = _label_blocks(draw, title, subtitle, extra_lines, size)
+        if sum(candidate_heights) <= max_h:
+            blocks, heights = candidate_blocks, candidate_heights
+            break
 
     total_h = sum(heights)
     y = max(MARGIN, (LABEL_H - total_h) // 2)
@@ -175,6 +194,19 @@ def start_print_job(img, quantity):
         }
     asyncio.run_coroutine_threadsafe(_run_print(job_id, img, quantity), _loop)
     return job_id
+
+
+@app.route('/preview', methods=['POST'])
+def preview():
+    data = request.get_json(force=True, silent=True) or {}
+    lines = [str(l).strip() for l in data.get('lines', []) if str(l).strip()]
+    if not lines:
+        return jsonify(error="No text provided"), 400
+    img = render_label(lines[0], extra_lines=lines[1:])
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    b64 = base64.b64encode(buf.getvalue()).decode('ascii')
+    return jsonify(image=f"data:image/png;base64,{b64}")
 
 
 @app.route('/print/text', methods=['POST'])

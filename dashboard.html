@@ -785,6 +785,12 @@ function loadLabelPrinter() {
   document.getElementById('focus-inner').innerHTML = `
     <div class="focus-title">Print Label</div>
     <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">Prints a 50×30mm label on the Niimbot printer near the fridge. Make sure it's awake (tap the power button).</p>
+    <div style="display:flex;justify-content:center;margin-bottom:16px;">
+      <div style="width:120px;height:200px;background:#fff;border:1px solid var(--border);border-radius:4px;box-shadow:0 2px 10px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;overflow:hidden;">
+        <div id="label-preview-placeholder" style="color:#999;font-size:11px;text-align:center;padding:8px;">Preview</div>
+        <img id="label-preview-img" style="display:none;width:100%;height:100%;object-fit:contain;">
+      </div>
+    </div>
     <input id="label-line1" type="text" placeholder="Item name (bold)" maxlength="30" style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14px;">
     <div style="display:flex;gap:8px;margin-bottom:8px;">
       <button onclick="fillLabelPreset('Purchased')" style="flex:1;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer;">Purchased today</button>
@@ -805,7 +811,44 @@ function loadLabelPrinter() {
       <div class="label-progress-track"><div id="label-progress-fill" class="label-progress-fill"></div></div>
     </div>
     <div id="label-status" style="font-size:12px;color:var(--muted);margin-top:12px;"></div>`;
-  ['label-line1','label-line2','label-line3'].forEach(id => oskAttach(document.getElementById(id)));
+  ['label-line1','label-line2','label-line3'].forEach(id => {
+    const el = document.getElementById(id);
+    oskAttach(el);
+    el.addEventListener('input', scheduleLabelPreview);
+  });
+}
+
+let labelPreviewTimer = null;
+function scheduleLabelPreview() {
+  clearTimeout(labelPreviewTimer);
+  labelPreviewTimer = setTimeout(updateLabelPreview, 300);
+}
+
+async function updateLabelPreview() {
+  const lines = [
+    document.getElementById('label-line1').value,
+    document.getElementById('label-line2').value,
+    document.getElementById('label-line3').value,
+  ].map(s => s.trim()).filter(Boolean);
+  const img = document.getElementById('label-preview-img');
+  const placeholder = document.getElementById('label-preview-placeholder');
+  if (lines.length === 0) {
+    img.style.display = 'none';
+    placeholder.style.display = 'block';
+    return;
+  }
+  try {
+    const res = await fetch('/label/preview', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({lines}) });
+    const data = await res.json();
+    if (data.image) {
+      img.src = data.image;
+      img.style.display = 'block';
+      placeholder.style.display = 'none';
+    }
+  } catch (e) {
+    // Preview is a nice-to-have -- leave the last good preview (or placeholder)
+    // showing rather than surfacing a network error here.
+  }
 }
 
 function ordinal(n) {
@@ -818,7 +861,9 @@ function formatLabelDate(d) {
 }
 
 function fillLabelPreset(action) {
-  document.getElementById('label-line2').value = `${action} on ${formatLabelDate(new Date())}`;
+  const line2 = document.getElementById('label-line2');
+  line2.value = `${action} on ${formatLabelDate(new Date())}`;
+  line2.dispatchEvent(new Event('input', { bubbles: true }));
   const line1 = document.getElementById('label-line1');
   if (!line1.value) line1.focus();
 }
