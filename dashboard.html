@@ -1313,6 +1313,28 @@ refreshAll();
 setInterval(refreshAll, 300000);
 setInterval(loadWeather, 600000);
 
+// ---------- Auto-reload on deploy ----------
+// The kiosk has no keyboard/mouse and nobody manually refreshes it, so a
+// newly deployed dashboard.html would otherwise sit unseen until someone
+// walks up and reloads it by hand. Poll this same file's Last-Modified
+// header (a plain HEAD request, served for free by Python's http.server)
+// and reload automatically the first time it changes from what was loaded.
+let dashboardLastModified = null;
+async function checkForDashboardUpdate() {
+  try {
+    const res = await fetch(location.pathname, { method: 'HEAD', cache: 'no-store' });
+    const lm = res.headers.get('Last-Modified');
+    if (dashboardLastModified === null) {
+      dashboardLastModified = lm;
+    } else if (lm && lm !== dashboardLastModified) {
+      location.reload();
+    }
+  } catch (e) {
+    // offline or server briefly down -- just try again next interval
+  }
+}
+setInterval(checkForDashboardUpdate, 30000);
+
 // ---------- Cooking Timer ----------
 let activeTimers = [];
 let timerAudioCtx = null;

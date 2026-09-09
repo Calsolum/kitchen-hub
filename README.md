@@ -19,6 +19,7 @@ Everything runs locally — no cloud dependency for the core features, no subscr
 - **Cooking timers** — multiple concurrent timers, persisted across reloads, alert on completion even while the screen is asleep
 - **Sleep mode** — the screen goes dark on inactivity, high CPU temperature, or a manual tap, dropping CPU load and heat when nobody's in the kitchen
 - **Draggable UI elements** — the floating voice and timer buttons can be repositioned anywhere on screen, with position persisted locally
+- **Self-updating kiosk** — the dashboard polls its own `Last-Modified` header and reloads itself the moment a new version is deployed, so a wall-mounted screen with no keyboard or mouse never needs to be manually refreshed (or power-cycled) to pick up a change
 
 ## Architecture
 
