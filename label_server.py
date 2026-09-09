@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import sys
 import os
-import time
 import uuid
 import asyncio
 import threading
@@ -75,10 +74,11 @@ def render_label(title, subtitle=None, extra_lines=None):
     return img
 
 
-# --- Print jobs run in a background thread against NiimPrintX's own asyncio
-# API (rather than shelling out to its CLI), so a POST /print/* returns
-# immediately with a job id and the dashboard can poll /print/status/<id> for
-# real phase + per-row progress instead of just waiting on one long request.
+# --- Print jobs run against NiimPrintX's own asyncio API (rather than
+# shelling out to its CLI) on one persistent background event loop, so a
+# POST /print/* returns immediately with a job id and the dashboard can poll
+# /print/status/<id> for real phase + per-row progress instead of just
+# waiting on one long request.
 JOBS = {}
 JOBS_LOCK = threading.Lock()
 
@@ -90,6 +90,19 @@ def _set_job(job_id, **kwargs):
 
 
 NIIMBOT_ADDR_CACHE = os.path.expanduser("~/.niimbot_last_address")
+
+# A BLE connection to this printer takes a few seconds to establish (scan +
+# handshake). The printer stays connected -- and awake -- for as long as a
+# central holds the connection open, so keeping this one alive across prints
+# means only the FIRST print after a wake needs the full connect; back-to-back
+# prints reuse it and skip straight to printing. Everything printer-related
+# runs on this single dedicated loop so the same PrinterClient/BleakClient
+# object can safely be reused between requests that arrive on different
+# Flask worker threads.
+_printer = None
+_printer_lock = asyncio.Lock()
+_loop = asyncio.new_event_loop()
+threading.Thread(target=_loop.run_forever, daemon=True).start()
 
 
 async def _connect_with_retry(job_id, max_attempts=3):
@@ -118,31 +131,39 @@ async def _connect_with_retry(job_id, max_attempts=3):
     raise last_exc
 
 
-async def _run_print(job_id, img, quantity):
-    printer = None
+def _is_connected(printer):
     try:
-        printer = await _connect_with_retry(job_id)
-        _set_job(job_id, phase="printing", current=0, total=img.height)
+        return bool(printer and printer.transport.client and printer.transport.client.is_connected)
+    except Exception:
+        return False
 
-        def progress_cb(current, total):
-            _set_job(job_id, current=current, total=total)
 
-        await printer.print_image(img, quantity=quantity, progress_cb=progress_cb)
-        # The label is on paper by this point -- disconnecting is just BLE
-        # session cleanup, and this D-Bus call has been seen to fail with the
-        # same post-reboot flakiness as connect(). A disconnect failure isn't
-        # a print failure, so it's handled in `finally` and never flips
-        # success to False.
-        _set_job(job_id, phase="done", done=True, success=True)
-    except Exception as e:
-        detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__} (no message)\n{traceback.format_exc()}"
-        _set_job(job_id, phase="failed", done=True, success=False, error=detail)
-    finally:
-        if printer is not None:
-            try:
-                await printer.disconnect()
-            except Exception:
-                pass
+async def _run_print(job_id, img, quantity, _retried=False):
+    global _printer
+    async with _printer_lock:
+        try:
+            if not _is_connected(_printer):
+                _printer = await _connect_with_retry(job_id)
+            printer = _printer
+            _set_job(job_id, phase="printing", current=0, total=img.height)
+
+            def progress_cb(current, total):
+                _set_job(job_id, current=current, total=total)
+
+            await printer.print_image(img, quantity=quantity, progress_cb=progress_cb)
+            _set_job(job_id, phase="done", done=True, success=True)
+            return
+        except Exception as e:
+            # The cached connection may have looked alive but wasn't (the
+            # printer can drop a connection without us noticing right away)
+            # -- one automatic retry with a forced fresh connect covers that
+            # transparently before actually failing the job.
+            _printer = None
+            if _retried:
+                detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__} (no message)\n{traceback.format_exc()}"
+                _set_job(job_id, phase="failed", done=True, success=False, error=detail)
+                return
+    await _run_print(job_id, img, quantity, _retried=True)
 
 
 def start_print_job(img, quantity):
@@ -152,11 +173,7 @@ def start_print_job(img, quantity):
             "phase": "queued", "current": 0, "total": 0,
             "done": False, "success": None, "error": None,
         }
-
-    def runner():
-        asyncio.run(_run_print(job_id, img, quantity))
-
-    threading.Thread(target=runner, daemon=True).start()
+    asyncio.run_coroutine_threadsafe(_run_print(job_id, img, quantity), _loop)
     return job_id
 
 
