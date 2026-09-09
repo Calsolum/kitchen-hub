@@ -74,11 +74,17 @@ def render_label(title, subtitle=None, extra_lines=None):
     img = Image.new("L", (LABEL_W, LABEL_H), 255)
     draw = ImageDraw.Draw(img)
     max_h = LABEL_H - MARGIN * 2
+    max_w = LABEL_W - MARGIN * 2
 
     blocks, heights = _label_blocks(draw, title, subtitle, extra_lines, FONT_TIERS[-1])
     for size in FONT_TIERS:
         candidate_blocks, candidate_heights = _label_blocks(draw, title, subtitle, extra_lines, size)
-        if sum(candidate_heights) <= max_h:
+        # _wrap() only breaks on word boundaries, so a single long word (e.g.
+        # "Japanese") can still come back wider than the label at a large
+        # size -- checking total height alone isn't enough, every line's
+        # actual rendered width has to fit too, or it just runs off the edge.
+        fits_width = all(draw.textlength(t, font=f) <= max_w for t, f in candidate_blocks)
+        if sum(candidate_heights) <= max_h and fits_width:
             blocks, heights = candidate_blocks, candidate_heights
             break
 
@@ -157,9 +163,25 @@ def _is_connected(printer):
         return False
 
 
+def _is_cancelled(job_id):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        return bool(job and job.get("cancelled"))
+
+
 async def _run_print(job_id, img, quantity, _retried=False):
     global _printer
+    # A job can only be cancelled while it's still queued -- once it's
+    # actually talking to the printer there's no clean way to abort a
+    # physical print already underway, so the checks below are the only
+    # two points where "cancelled" can still take effect.
+    if _is_cancelled(job_id):
+        _set_job(job_id, phase="cancelled", done=True, success=False, error="Cancelled")
+        return
     async with _printer_lock:
+        if _is_cancelled(job_id):
+            _set_job(job_id, phase="cancelled", done=True, success=False, error="Cancelled")
+            return
         try:
             if not _is_connected(_printer):
                 _printer = await _connect_with_retry(job_id)
@@ -190,7 +212,7 @@ def start_print_job(img, quantity):
     with JOBS_LOCK:
         JOBS[job_id] = {
             "phase": "queued", "current": 0, "total": 0,
-            "done": False, "success": None, "error": None,
+            "done": False, "success": None, "error": None, "cancelled": False,
         }
     asyncio.run_coroutine_threadsafe(_run_print(job_id, img, quantity), _loop)
     return job_id
@@ -250,6 +272,18 @@ def print_status(job_id):
     if not job:
         return jsonify(error="unknown job"), 404
     return jsonify(job)
+
+
+@app.route('/print/cancel/<job_id>', methods=['POST'])
+def cancel_job(job_id):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            return jsonify(error="unknown job"), 404
+        if job["done"]:
+            return jsonify(success=False, error="Job already finished"), 400
+        job["cancelled"] = True
+    return jsonify(success=True)
 
 
 @app.route('/status')

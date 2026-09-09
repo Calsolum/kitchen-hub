@@ -757,7 +757,7 @@ async function pollPrintJob(jobId, onUpdate) {
 
 function labelPhaseText(job) {
   switch (job.phase) {
-    case 'queued': return 'Starting...';
+    case 'queued': return 'Waiting to print...';
     case 'scanning': return 'Looking for the printer...';
     case 'connecting': return 'Connecting...';
     case 'printing':
@@ -765,6 +765,7 @@ function labelPhaseText(job) {
       return `Printing... ${job.total ? Math.round(job.current / job.total * 100) : 0}%`;
     case 'done': return 'Printed!';
     case 'failed': return 'Failed: ' + (job.error || 'unknown error');
+    case 'cancelled': return 'Cancelled';
     default: return '';
   }
 }
@@ -809,16 +810,44 @@ function loadLabelPrinter() {
         <button onclick="adjustLabelQty(1)" style="width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:18px;cursor:pointer;">+</button>
       </div>
     </div>
-    <button onclick="submitLabelPrint()" style="width:100%;padding:12px;border-radius:10px;border:none;background:var(--accent);color:#000;font-size:14px;font-weight:bold;cursor:pointer;">Print Label</button>
-    <div id="label-progress-wrap" style="display:none;margin-top:14px;">
-      <div class="label-progress-track"><div id="label-progress-fill" class="label-progress-fill"></div></div>
-    </div>
-    <div id="label-status" style="font-size:12px;color:var(--muted);margin-top:12px;"></div>`;
+    <button id="label-print-btn" onclick="submitLabelPrint()" style="width:100%;padding:12px;border-radius:10px;border:none;background:var(--accent);color:#000;font-size:14px;font-weight:bold;cursor:pointer;">Print Label</button>
+    <div id="label-status" style="font-size:12px;color:var(--muted);margin-top:12px;"></div>
+    <div id="label-queue" style="margin-top:12px;"></div>`;
   ['label-line1','label-line2','label-line3'].forEach(id => {
     const el = document.getElementById(id);
     oskAttach(el);
     el.addEventListener('input', scheduleLabelPreview);
   });
+  renderLabelQueue();
+}
+
+let labelJobs = [];
+
+function renderLabelQueue() {
+  const el = document.getElementById('label-queue');
+  if (!el) return;
+  if (labelJobs.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = labelJobs.map(j => {
+    const pct = labelJobPercent(j.status);
+    const text = labelPhaseText(j.status);
+    const cancellable = j.status.phase === 'queued';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:9px 10px;background:var(--surface2);border-radius:8px;margin-bottom:6px;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${j.label}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px;">${text}</div>
+        <div class="label-progress-track" style="margin-top:5px;height:4px;"><div class="label-progress-fill" style="width:${pct}%;"></div></div>
+      </div>
+      ${cancellable ? `<button onclick="cancelLabelJob('${j.id}')" style="flex-shrink:0;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--accent3);font-size:11px;cursor:pointer;">Cancel</button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function cancelLabelJob(id) {
+  try {
+    await fetch(`/label/print/cancel/${id}`, { method: 'POST' });
+  } catch (e) {
+    // the next status poll will just keep showing its current state
+  }
 }
 
 let labelPreviewTimer = null;
@@ -884,30 +913,31 @@ async function submitLabelPrint() {
   ].map(s => s.trim()).filter(Boolean);
   const quantity = labelQty;
   const status = document.getElementById('label-status');
-  const progressWrap = document.getElementById('label-progress-wrap');
-  const progressFill = document.getElementById('label-progress-fill');
+  const btn = document.getElementById('label-print-btn');
   if (lines.length === 0) { status.textContent = 'Enter at least one line of text.'; return; }
-  status.textContent = 'Starting... (make sure the printer is awake)';
-  progressWrap.style.display = 'block';
-  progressFill.style.width = '0%';
+  status.textContent = '';
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
   try {
     const res = await fetch('/label/print/text', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({lines, quantity}) });
     const data = await res.json();
     if (!data.job_id) {
-      progressWrap.style.display = 'none';
       status.textContent = 'Failed: ' + (data.error || 'unknown error');
       return;
     }
-    const job = await pollPrintJob(data.job_id, (j) => {
-      progressFill.style.width = labelJobPercent(j) + '%';
-      status.textContent = labelPhaseText(j);
+    const entry = { id: data.job_id, label: lines[0], status: { phase: 'queued', current: 0, total: 0, done: false } };
+    labelJobs.unshift(entry);
+    labelJobs = labelJobs.slice(0, 5);
+    renderLabelQueue();
+    await pollPrintJob(data.job_id, (j) => {
+      entry.status = j;
+      renderLabelQueue();
     });
-    progressWrap.style.display = 'none';
-    status.textContent = job.success ? 'Printed!' : ('Failed: ' + (job.error || 'unknown error'));
-  } catch(e) {
-    progressWrap.style.display = 'none';
+  } catch (e) {
     status.textContent = 'Could not reach the label printer service.';
   }
+  btn.disabled = false;
+  btn.style.opacity = '1';
 }
 
 async function loadFullShopping() {
