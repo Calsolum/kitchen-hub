@@ -286,6 +286,11 @@ def cancel_job(job_id):
     return jsonify(success=True)
 
 
+@app.route('/printer/status')
+def printer_status():
+    return jsonify(connected=_is_connected(_printer))
+
+
 @app.route('/status')
 def status():
     return jsonify(ok=True)
