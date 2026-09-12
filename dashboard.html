@@ -389,6 +389,10 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
           <div class="action-label">Print Label</div>
           <div class="action-sub">Niimbot label maker</div>
         </div>
+        <div class="action-btn" onclick="openFocus('consumables')">
+          <div class="action-label">Household Items</div>
+          <div class="action-sub">Track supplies</div>
+        </div>
       </div>
     </div>
     <div class="card" onclick="openFocus('flipp')">
@@ -452,6 +456,63 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
 const GROCY_KEY = "YOUR_GROCY_API_KEY";
 const GROCY_URL = "";
 const EMERGENCY_FOOD_GROUP_ID = 13; // Grocy product group "Emergency Food" -- ready-to-eat grab-and-go items
+const CONSUMABLES_GROUP_ID = 14; // Grocy product group "Household Consumables" -- garbage bags, filters, detergent pods, etc.
+
+async function loadConsumablesFocus() {
+  document.getElementById('focus-inner').innerHTML = '<div class="focus-title">Household Items</div><div class="loading">Loading...</div>';
+  try {
+    const stock = await grocyGet('stock');
+    const items = stock.filter(i => i.product && i.product.product_group_id === CONSUMABLES_GROUP_ID);
+    document.getElementById('focus-inner').innerHTML = `<div class="focus-title">Household Items</div>
+      ${items.length === 0 ? '<div style="font-size:12px;color:var(--muted);">Nothing tracked yet -- add products to the "Household Consumables" group in Grocy.</div>' :
+      items.map(item => {
+        const amount = parseFloat(item.amount) || 0;
+        const minStock = parseFloat(item.product.min_stock_amount) || 0;
+        // Matches Grocy's own add-missing-products semantics exactly (strictly
+        // below minimum, not at-or-below) so the LOW badge and the shopping
+        // list add always happen at the same point -- confirmed via direct
+        // testing, not assumed.
+        const badgeClass = amount <= 0 ? 'out' : amount < minStock ? 'low' : 'ok';
+        const badgeText = amount <= 0 ? 'OUT' : amount < minStock ? amount + ' (LOW)' : amount;
+        return `<div class="stock-item">
+          <span class="stock-name">${item.product.name}</span>
+          <span class="stock-badge ${badgeClass}">${badgeText}</span>
+          <button onclick="consumeOne(${item.product.id},this)" ${amount<=0?'disabled':''} style="margin-left:8px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;padding:4px 10px;cursor:pointer;">Used one</button>
+          <button onclick="restockOne(${item.product.id},this)" style="margin-left:6px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:12px;padding:4px 10px;cursor:pointer;">Bought a box</button>
+        </div>`;
+      }).join('')}`;
+  } catch (e) {
+    document.getElementById('focus-inner').innerHTML = '<div class="focus-title">Household Items</div><div class="loading">Could not load</div>';
+  }
+}
+
+async function consumeOne(productId, btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const res = await fetch(`/consumables/consume/${productId}`, { method: 'POST' });
+    const data = await res.json();
+    btn.textContent = data.success ? '✓' : '✗';
+  } catch (e) {
+    btn.textContent = '✗';
+  }
+  setTimeout(loadConsumablesFocus, 900);
+}
+
+async function restockOne(productId, btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const res = await fetch(`/consumables/restock/${productId}`, { method: 'POST' });
+    const data = await res.json();
+    btn.textContent = data.success ? '✓' : '✗';
+  } catch (e) {
+    btn.textContent = '✗';
+  }
+  setTimeout(loadConsumablesFocus, 900);
+}
 const GROCY_HEADERS = { 'GROCY-API-KEY': GROCY_KEY };
 const MEALIE_TOKEN = "YOUR_MEALIE_API_TOKEN";
 const MEALIE_URL = "/mealie";
@@ -1025,6 +1086,7 @@ function openFocus(type) {
   else if (type==='timer') loadTimer();
   else if (type==='emergency') loadEmergencyFoodFocus();
   else if (type==='label') loadLabelPrinter();
+  else if (type==='consumables') loadConsumablesFocus();
 }
 
 const FLIPP_POSTAL = "L6P1A1"; // Update with your postal code

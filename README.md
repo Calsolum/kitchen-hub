@@ -11,6 +11,7 @@ Everything runs locally — no cloud dependency for the core features, no subscr
 - **Inventory tracking** via [Grocy](https://grocy.info/) — stock levels, expiry alerts, shopping list, all synced to a touch-friendly summary view
 - **Recipes** via [Mealie](https://mealie.io/) — "what can I cook tonight?" checks your actual stock against saved recipes
 - **Emergency Food** — a dedicated view for already-prepared, grab-and-go items (the kind of thing you eat when you're too tired to cook), tagged directly in Grocy
+- **Household consumables tracker** — garbage bags, coffee filters, detergent pods and the like, tracked the same way Grocy tracks food: tap "Used one" to decrement, "Bought a box" to restock, and it lands on the shopping list automatically the moment it drops below its threshold — no separate spreadsheet or app for things that aren't groceries but still run out
 - **Voice commands** — a local [faster-whisper](https://github.com/SYSTRAN/faster-whisper) transcription server turns spoken commands like *"I used two eggs"* or *"add milk to the shopping list"* into real Grocy API calls, entirely on-device, no cloud speech API
 - **Voice-driven YouTube search** — *"play lofi hip hop on youtube"* finds and embeds the top result inline
 - **Live security camera feeds** — real-time video from WiFi cameras around the house, routed through Home Assistant and proxied server-side so no credentials ever touch the browser
@@ -30,18 +31,20 @@ Everything runs locally — no cloud dependency for the core features, no subscr
 │  Chromium (kiosk mode, Wayland/labwc) ── touchscreen display  │
 │         │                                                      │
 │         ▼                                                      │
-│  nginx (reverse proxy + TLS) ──┬── /            → Grocy       │
-│                                  ├── /dashboard/  → dashboard   │
-│                                  ├── /mealie/     → Mealie      │
-│                                  ├── /whisper/    → whisper svc │
-│                                  ├── /calendar/   → calendar svc│
-│                                  └── /label/      → label svc   │
+│  nginx (reverse proxy + TLS) ──┬── /             → Grocy       │
+│                                  ├── /dashboard/   → dashboard   │
+│                                  ├── /mealie/      → Mealie      │
+│                                  ├── /whisper/     → whisper svc │
+│                                  ├── /calendar/    → calendar svc│
+│                                  ├── /label/       → label svc   │
+│                                  └── /consumables/ → consumables │
 │                                                                │
 │  Docker Compose:  grocy · mealie · whisper (faster-whisper)   │
 │                    home-assistant                              │
 │  Host systemd:     dashboard (static file server)              │
 │                     calendar_server.py (Flask: Calendar+Flipp) │
 │                     label_server.py (Flask → NiimPrintX → BLE) │
+│                     consumables_server.py (Flask → Grocy)      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -80,6 +83,8 @@ A few things that came up building this that might be useful if you're doing som
 - **A double-tap that printed twice**: same physical-side-effect problem as the false-negative print failures above, from a different angle — the "Print Label" button had no submit guard, so a double-tap queued two real print jobs. Fixed at the source (disable the button while a job is in flight) and added a small print queue with per-job progress and a Cancel button for anything still genuinely queued behind another print — cancellation is checked right before a queued job would start talking to the printer, so it can only ever stop a job that hasn't printed anything yet, never a garbled mid-print abort.
 - **One long word shrinking text that didn't need to shrink**: fitting a title and subtitle to the label by scaling the subtitle as a fixed ratio of the title's font size seemed reasonable, until a single long unsplittable word in the title (like "Japanese") capped the title at a small size to fit the label's width — and dragged a subtitle that would have fit fine much larger down to that same tiny size along with it. Title and subtitle now each pick their own best-fitting size independently, so short subtitle text fills the space it actually has rather than being held hostage by an unrelated long word elsewhere on the label.
 - **Reverse-engineering a label printer with no official SDK**: the Niimbot B1-Pro has no public protocol docs, only a community-maintained reference (niimbluelib). Prints reported "completed" but came out physically blank — turned out to be two separate payload-format bugs in the third-party Python library this project builds on: `PrintStart` needs a model-specific 7-byte payload, and `SetPageSize` a 6-byte one, both undocumented outside the JS reference implementation. The final, sneakiest bug was in Bluetooth device discovery itself — the library's device-matching filter assumed the printer's BLE advertisement would carry zero service UUIDs, which was false for this unit's actual advertisement, so it silently rejected the one device it was scanning for. A raw BLE scan (bypassing the library entirely) was what exposed that the printer had been discoverable the whole time.
+- **"Fewest lines" turned out to be the wrong metric, twice, in opposite directions**: getting label text to size itself well took three attempts. First, maximizing font size alone stacked short subtitle text into narrow, mostly-empty lines instead of using the label's width. The fix — prefer whichever size wraps to the fewest lines, biggest size as a tiebreaker — fixed that, but then a 3-word title got crushed down to ~17pt just to fit on one line, when it read perfectly fine as three short lines at 45pt: "fewest lines" has no floor on how small "smallest that achieves it" can be. The actual fix was simpler than either attempt: pick the largest size where every line still fits the label's width (this alone already discourages the narrow-line case, since bigger fonts naturally need more, narrower lines) and drop the fewest-lines preference entirely. Each version looked correct on the case that motivated it and wrong on the other — worth generating both test cases before trusting either fix.
+- **A "low stock" threshold that didn't trigger on the boundary**: the household consumables tracker calls Grocy's own `add-missing-products` endpoint rather than reimplementing the "is this below minimum" check — except Grocy's own definition of "missing" is strictly *less than* `min_stock_amount`, not less-than-or-equal. Stock sitting at exactly the threshold looked "low" in the dashboard's own badge logic but never actually landed on the shopping list, a one-unit gap between the visual cue and the real trigger that only showed up by testing the exact boundary value directly against the live API rather than assuming the endpoint's name meant what it sounded like.
 
 ## Setup
 
@@ -92,6 +97,7 @@ This isn't a one-click deploy — it's tuned to specific hardware (a Raspberry P
 5. For voice commands to work, `EMERGENCY_FOOD_GROUP_ID` and the Grocy API key in `dashboard.html` need to match your own Grocy instance.
 6. Launch Chromium in kiosk mode pointed at your nginx host — see the comments in `dashboard.html` and the architecture diagram above for how the pieces fit together.
 7. Label printing (optional) needs a Niimbot BLE printer, [NiimPrintX](https://github.com/labbots/NiimPrintX) cloned locally, and `label_server.py`'s own Grocy API key filled in. NiimPrintX's upstream `bluetooth.py` and `printer.py` needed several fixes for this printer model — see the reverse-engineering note above — so expect to patch a fresh clone rather than using it as-is.
+8. Household consumables tracking (optional) needs its own Grocy product group and products created first (see `consumables_server.py`'s `BOX_SIZES` map for the expected product ids), and `CONSUMABLES_GROUP_ID` in `dashboard.html` set to match.
 
 ## License
 

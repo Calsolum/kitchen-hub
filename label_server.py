@@ -47,10 +47,12 @@ def _wrap(draw, text, font, max_width):
     return lines
 
 
-# Largest-first sizes to try when auto-fitting content to the label. A short
-# label (most of them -- an item name and a date) should fill the sticker,
-# not sit in the middle of a sea of white space at a fixed small size.
-FONT_TIERS = [64, 56, 48, 42, 36, 30]
+# Point sizes to try when auto-fitting content to the label, largest first.
+# Fine-grained (every point, not a handful of fixed tiers) because the tier
+# gaps matter: the largest size that achieves a given line count is often
+# between two coarse tiers, and picking a tier below it wastes size for no
+# reason.
+FONT_SIZE_RANGE = range(72, 15, -1)
 
 
 def _lines_fit(draw, lines, font, max_w):
@@ -63,11 +65,20 @@ def _block_height(draw, text, font):
 
 
 def _best_fit(draw, texts, font_path, max_w, max_h):
-    """Largest tier whose wrapped lines all fit max_w and whose total height
-    fits max_h; falls back to the smallest tier (and however it wraps) if
-    nothing fits both, so there's always something to draw."""
-    lines, size = None, FONT_TIERS[-1]
-    for candidate in FONT_TIERS:
+    """Largest size whose wrapped lines all fit max_w and whose total height
+    fits max_h, using each size's own natural word-wrap line count.
+
+    Tried preferring the fewest wrapped lines above all (biasing toward wider
+    lines when a smaller size could still fit everything on fewer of them),
+    but that's an overcorrection: for a title long enough to need 2-3 lines
+    at any legible size, "fewest lines" is satisfied only by shrinking all
+    the way down to whatever tiny size crams it onto one line -- e.g. a
+    3-word title forced to ~17pt just to avoid a second line, when it reads
+    perfectly fine as 3 short lines at 45pt. Plain "largest that fits" doesn't
+    have that failure mode and still avoids the original clipping bug via the
+    width check below."""
+    candidates = []
+    for candidate in FONT_SIZE_RANGE:
         font = ImageFont.truetype(font_path, candidate)
         wrapped = []
         for text in texts:
@@ -76,15 +87,19 @@ def _best_fit(draw, texts, font_path, max_w, max_h):
             continue
         heights = [_block_height(draw, t, font) for t in wrapped]
         if sum(heights) <= max_h:
-            lines, size = wrapped, candidate
-            break
-    if lines is None:
-        font = ImageFont.truetype(font_path, size)
+            candidates.append((len(wrapped), candidate, wrapped, heights))
+
+    if not candidates:
+        font = ImageFont.truetype(font_path, FONT_SIZE_RANGE[-1])
         lines = []
         for text in texts:
             lines.extend(_wrap(draw, text, font, max_w))
+        heights = [_block_height(draw, t, font) for t in lines]
+        return lines, font, heights
+
+    best = max(candidates, key=lambda c: c[1])
+    _, size, lines, heights = best
     font = ImageFont.truetype(font_path, size)
-    heights = [_block_height(draw, t, font) for t in lines]
     return lines, font, heights
 
 
