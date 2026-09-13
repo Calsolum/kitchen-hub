@@ -1266,6 +1266,16 @@ let micStream = null;
 
 let oskTarget = null;
 let oskCaps = false;
+
+// Tapping a key div is a mousedown/mouseup/click sequence like any other
+// element -- the mousedown alone is enough for the browser to blur whatever
+// input currently has focus, before oskPress()/oskBackspace() even run. That
+// left selectionStart/selectionEnd unreliable on the (now-blurred) target,
+// which was building typed text in reverse instead of respecting the
+// cursor. Suppressing the default mousedown behavior on the whole keyboard
+// keeps focus on the text field throughout every tap; the click (and its
+// onclick handler) still fires normally afterward.
+document.getElementById('osk').addEventListener('mousedown', e => e.preventDefault());
 let labelQty = 1;
 
 function oskAttach(el) {
@@ -1273,13 +1283,33 @@ function oskAttach(el) {
 }
 function oskPress(ch) {
   if (!oskTarget) return;
-  oskTarget.value += oskCaps ? ch.toUpperCase() : ch;
-  oskTarget.dispatchEvent(new Event('input', {bubbles:true}));
+  const el = oskTarget;
+  // Insert/delete at the actual cursor position (or replace a selection),
+  // not always at the end -- tapping into the field to place the cursor
+  // already works natively on a real <input>, but the keyboard was
+  // ignoring that and always appending, making it impossible to fix a
+  // typo anywhere but the very end without retyping everything after it.
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? el.value.length;
+  const insert = oskCaps ? ch.toUpperCase() : ch;
+  el.value = el.value.slice(0, start) + insert + el.value.slice(end);
+  el.setSelectionRange(start + insert.length, start + insert.length);
+  el.dispatchEvent(new Event('input', {bubbles:true}));
 }
 function oskBackspace() {
   if (!oskTarget) return;
-  oskTarget.value = oskTarget.value.slice(0, -1);
-  oskTarget.dispatchEvent(new Event('input', {bubbles:true}));
+  const el = oskTarget;
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? el.value.length;
+  if (start === end) {
+    if (start === 0) return;
+    el.value = el.value.slice(0, start - 1) + el.value.slice(start);
+    el.setSelectionRange(start - 1, start - 1);
+  } else {
+    el.value = el.value.slice(0, start) + el.value.slice(end);
+    el.setSelectionRange(start, start);
+  }
+  el.dispatchEvent(new Event('input', {bubbles:true}));
 }
 function oskShift() {
   oskCaps = !oskCaps;

@@ -28,8 +28,23 @@ GROCY_KEY = "YOUR_GROCY_API_KEY"
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
-LABEL_W, LABEL_H = 240, 400
+# LABEL_W was wrong from the start -- 240 assumed a 30mm-wide label, but a
+# real printed frame test measured against the actual physical label (border
+# vs. label edges, both photographed and pixel-measured) showed the true
+# usable width is ~2.76x that, ~664px -- LABEL_H=400 was already correct
+# (the same test's vertical border sat within 1px of the label's real top/
+# bottom edges). No amount of font-size tuning inside the old 240px canvas
+# could ever have used the label's real width, since the canvas itself was
+# only ever a third as wide as the physical print area.
+LABEL_W, LABEL_H = 640, 394
 MARGIN = 20
+# Text rendered dead-center in the canvas printed visibly right-of-center on
+# the physical label (confirmed by direct printed test, not assumed) --
+# likely a small registration offset between this print head and where the
+# die-cut label's own left edge actually sits. Software can't correct the
+# printer's physical alignment, so nudge our own centering left to
+# compensate empirically.
+HORIZONTAL_SHIFT = -16
 
 
 def _wrap(draw, text, font, max_width):
@@ -52,16 +67,49 @@ def _wrap(draw, text, font, max_width):
 # gaps matter: the largest size that achieves a given line count is often
 # between two coarse tiers, and picking a tier below it wastes size for no
 # reason.
-FONT_SIZE_RANGE = range(72, 15, -1)
+# 72 was an incidental ceiling from when LABEL_W=240 made width the binding
+# constraint almost every time -- with the corrected, much wider canvas,
+# max_h (unchanged) is what should limit size now, so raise the range's top
+# well above anything reachable and let _best_fit's own max_w/max_h checks
+# do the limiting.
+FONT_SIZE_RANGE = range(200, 15, -1)
+
+
+def _ink_size(draw, text, font):
+    """Actual rendered pixel size of text, relative to a (0,0) draw origin --
+    unlike textlength()'s advance width, this reflects real glyph extent
+    (bold/hinting overhang included), which is what determines whether text
+    actually gets clipped by the canvas edge. The gap between the two is only
+    a pixel or two, which was invisible back when fonts topped out at 72pt
+    inside a much narrower canvas; at the larger sizes now reachable in the
+    wider corrected canvas, that same pixel or two is enough to center text
+    slightly past the canvas edge and clip the last glyph."""
+    l, t, r, b = draw.textbbox((0, 0), text, font=font)
+    return (r - l), (b - t)
+
+
+# Real physical prints of large bold text clipped at the right edge even
+# though textbbox()-measured ink sat 20+px inside max_w with room to spare --
+# confirmed via direct printed tests, not assumed. Large solid-fill bold
+# glyphs apparently spread further under this thermal print head than the
+# antialiased software rendering predicts (heat/dot-bleed proportional to how
+# much of the head is firing at once, which software measurement has no way
+# to model). A flat pixel buffer isn't enough since the gap scales with how
+# big/bold the text is, so fit-checks require a percentage of max_w free
+# rather than trusting the measured ink width right up to the limit.
+WIDTH_FIT_SAFETY = 0.90
 
 
 def _lines_fit(draw, lines, font, max_w):
-    return all(draw.textlength(t, font=font) <= max_w for t in lines)
+    return all(_ink_size(draw, t, font)[0] <= max_w * WIDTH_FIT_SAFETY for t in lines)
 
 
 def _block_height(draw, text, font):
-    bbox = draw.textbbox((0, 0), text, font=font)
-    return bbox[3] - bbox[1] + 12
+    # Breathing room between stacked lines, scaled with size rather than a
+    # flat pixel constant -- a flat +12px was fine when fonts topped out at
+    # 72pt, but became a rounding error at the much larger sizes now
+    # reachable, letting stacked blocks drift past the canvas bottom.
+    return _ink_size(draw, text, font)[1] + max(6, font.size // 8)
 
 
 def _best_fit(draw, texts, font_path, max_w, max_h):
@@ -103,37 +151,92 @@ def _best_fit(draw, texts, font_path, max_w, max_h):
     return lines, font, heights
 
 
+def _grow_lines_independently(draw, lines, base_size, font_path, max_w, slack):
+    """_best_fit picks one shared size for a whole block, sized to the
+    *widest* line -- a short line on its own row (e.g. "salad" next to
+    "hicken"/"ceasar") ends up with unused width on both sides purely
+    because it's shorter, not because the block is mis-sized. Let each line
+    grow independently past the shared base size as far as it individually
+    fits max_w, spending from the block's own unused height (`slack`) as it
+    goes -- bounded on both axes, so growth can't run away the way "prefer
+    fewest lines" or hard-breaking a word did in earlier attempts."""
+    results = []
+    for text in lines:
+        base_font = ImageFont.truetype(font_path, base_size)
+        base_h = _block_height(draw, text, base_font)
+        chosen_size, chosen_h = base_size, base_h
+        for size in range(base_size + 1, FONT_SIZE_RANGE[0] + 1):
+            font = ImageFont.truetype(font_path, size)
+            if _ink_size(draw, text, font)[0] > max_w * WIDTH_FIT_SAFETY:
+                break
+            h = _block_height(draw, text, font)
+            if h - base_h > slack:
+                break
+            chosen_size, chosen_h = size, h
+        slack -= (chosen_h - base_h)
+        results.append((text, ImageFont.truetype(font_path, chosen_size), chosen_h))
+    return results, slack
+
+
 def render_label(title, subtitle=None, extra_lines=None):
     img = Image.new("L", (LABEL_W, LABEL_H), 255)
     draw = ImageDraw.Draw(img)
-    max_h = LABEL_H - MARGIN * 2
-    max_w = LABEL_W - MARGIN * 2
+    # A small fixed safety margin absorbs sub-pixel rounding between what
+    # textbbox() measures and what the rasterizer actually draws -- without
+    # it, growing text right up to the theoretical limit occasionally clips
+    # a glyph by a pixel or two at the sizes now reachable in the wider
+    # corrected canvas (invisible at the old canvas's much smaller sizes).
+    EDGE_SAFETY = 4
+    max_h = LABEL_H - MARGIN * 2 - EDGE_SAFETY
+    max_w = LABEL_W - MARGIN * 2 - EDGE_SAFETY
+
+    sub_source = list(extra_lines or [])
+    if subtitle:
+        sub_source.append(subtitle)
 
     # Title and subtitle are sized independently rather than one scaling the
     # other by a fixed ratio -- a single long, unsplittable word in the title
     # (e.g. "Japanese") can cap how large the title is allowed to be, but
     # that shouldn't also force short subtitle text down to a tiny size when
-    # the subtitle would happily fit much larger on its own.
-    title_lines, title_font, title_heights = _best_fit(draw, [title], FONT_BOLD, max_w, max_h)
+    # the subtitle would happily fit much larger on its own. But the title
+    # can't be allowed to claim *all* of max_h either: the much wider
+    # corrected canvas lets even a short title reach sizes that alone fill
+    # the whole height, pushing the subtitle off the canvas entirely (this
+    # is what was silently dropping "Prepared on ..." altogether). Cap the
+    # title's own search to a share of the height and guarantee the rest --
+    # if the title ends up needing less, remaining_h below still hands the
+    # subtitle whatever's actually left over, not just its guaranteed share.
+    title_max_h = int(max_h * 0.68) if sub_source else max_h
+    title_lines, title_font, title_heights = _best_fit(draw, [title], FONT_BOLD, max_w, title_max_h)
+    title_slack = title_max_h - sum(title_heights)
+    title_blocks, title_slack = _grow_lines_independently(
+        draw, title_lines, title_font.size, FONT_BOLD, max_w, title_slack)
 
-    sub_source = list(extra_lines or [])
-    if subtitle:
-        sub_source.append(subtitle)
     if sub_source:
-        remaining_h = max(0, max_h - sum(title_heights))
+        remaining_h = max(0, max_h - sum(h for _, _, h in title_blocks))
         sub_lines, sub_font, sub_heights = _best_fit(draw, sub_source, FONT_REGULAR, max_w, remaining_h)
+        sub_slack = remaining_h - sum(sub_heights)
+        sub_blocks, sub_slack = _grow_lines_independently(
+            draw, sub_lines, sub_font.size, FONT_REGULAR, max_w, sub_slack)
     else:
-        sub_lines, sub_font, sub_heights = [], None, []
+        sub_blocks = []
 
-    blocks = [(t, title_font) for t in title_lines] + [(t, sub_font) for t in sub_lines]
-    heights = title_heights + sub_heights
+    blocks = [(t, f) for t, f, h in title_blocks] + [(t, f) for t, f, h in sub_blocks]
+    heights = [h for _, _, h in title_blocks] + [h for _, _, h in sub_blocks]
 
     total_h = sum(heights)
     y = max(MARGIN, (LABEL_H - total_h) // 2)
     for (text, font), h in zip(blocks, heights):
-        w = draw.textlength(text, font=font)
-        x = max(MARGIN, (LABEL_W - w) // 2)
-        draw.text((x, y), text, font=font, fill=0)
+        l, t, r, b = draw.textbbox((0, 0), text, font=font)
+        w = r - l
+        x = max(MARGIN, (LABEL_W - w) // 2) + HORIZONTAL_SHIFT
+        # Compensate for the font's own left/top bearing so the actual ink
+        # starts exactly at (x, y) -- otherwise stacked blocks drift
+        # downward (and centering drifts sideways) by however much bearing
+        # each font/string combination happens to have. That drift is what
+        # was pushing the last title line's bottom past the canvas edge and
+        # shoving the subtitle off-canvas entirely once sizes got large.
+        draw.text((x - l, y - t), text, font=font, fill=0)
         y += h
 
     return img
