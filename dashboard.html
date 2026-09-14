@@ -458,15 +458,49 @@ const GROCY_URL = "";
 const EMERGENCY_FOOD_GROUP_ID = 13; // Grocy product group "Emergency Food" -- ready-to-eat grab-and-go items
 const CONSUMABLES_GROUP_ID = 14; // Grocy product group "Household Consumables" -- garbage bags, filters, detergent pods, etc.
 
+let consumablesAddOpen = false;
+let consumablesConfirmRemoveId = null;
+
 async function loadConsumablesFocus() {
   document.getElementById('focus-inner').innerHTML = '<div class="focus-title">Household Items</div><div class="loading">Loading...</div>';
   try {
-    const stock = await grocyGet('stock');
-    const items = stock.filter(i => i.product && i.product.product_group_id === CONSUMABLES_GROUP_ID);
+    // /api/stock only lists products that currently HAVE stock -- a product
+    // reset (or consumed down) to exactly 0 disappears from it entirely
+    // rather than showing as 0, which made "Reset to 0" look like it deleted
+    // the item. Source the tracked item list from every product in the
+    // group instead, and merge in a stock amount (0 if the product has no
+        // entry there at all) so out-of-stock items keep showing up.
+    const [products, stock, boxSizes] = await Promise.all([
+      grocyGet('objects/products'),
+      grocyGet('stock'),
+      fetch('/consumables/box_sizes').then(r => r.json()).catch(() => ({})),
+    ]);
+    const stockById = {};
+    stock.forEach(s => { stockById[s.product_id] = parseFloat(s.amount) || 0; });
+    const items = products
+      .filter(p => p.product_group_id === CONSUMABLES_GROUP_ID)
+      .map(p => ({ product: p, amount: stockById[p.id] || 0 }));
+
+    const addFormHtml = !consumablesAddOpen ? '' : `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:14px;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:11px;color:var(--muted);">
+        <input type="text" id="add-consumable-name" placeholder="Item name" style="flex:1;min-width:120px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;padding:5px 8px;">
+        <span>Low at</span>
+        <input type="text" inputmode="numeric" id="add-consumable-minstock" value="5" style="width:38px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:4px;text-align:center;">
+        <span>Box size</span>
+        <input type="text" inputmode="numeric" id="add-consumable-boxsize" value="1" style="width:38px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:4px;text-align:center;">
+        <span>Starting count</span>
+        <input type="text" inputmode="numeric" id="add-consumable-initial" value="0" style="width:38px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:4px;text-align:center;">
+        <button onclick="submitAddConsumable(this)" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:12px;padding:5px 12px;cursor:pointer;">Add</button>
+      </div>`;
+
     document.getElementById('focus-inner').innerHTML = `<div class="focus-title">Household Items</div>
-      ${items.length === 0 ? '<div style="font-size:12px;color:var(--muted);">Nothing tracked yet -- add products to the "Household Consumables" group in Grocy.</div>' :
+      <div style="margin-bottom:10px;">
+        <button onclick="toggleAddConsumable()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:12px;padding:5px 12px;cursor:pointer;">${consumablesAddOpen ? 'Cancel' : '+ Add Item'}</button>
+      </div>
+      ${addFormHtml}
+      ${items.length === 0 ? '<div style="font-size:12px;color:var(--muted);">Nothing tracked yet -- add an item above, or add products to the "Household Consumables" group in Grocy directly.</div>' :
       items.map(item => {
-        const amount = parseFloat(item.amount) || 0;
+        const id = item.product.id;
+        const amount = item.amount;
         const minStock = parseFloat(item.product.min_stock_amount) || 0;
         // Matches Grocy's own add-missing-products semantics exactly (strictly
         // below minimum, not at-or-below) so the LOW badge and the shopping
@@ -474,16 +508,117 @@ async function loadConsumablesFocus() {
         // testing, not assumed.
         const badgeClass = amount <= 0 ? 'out' : amount < minStock ? 'low' : 'ok';
         const badgeText = amount <= 0 ? 'OUT' : amount < minStock ? amount + ' (LOW)' : amount;
-        return `<div class="stock-item">
+        const boxSize = boxSizes[id] || 1;
+        // The controls row is a width:100% child of this same flex-wrap
+        // .stock-item, not a sibling element -- keeps the existing
+        // border-bottom/:last-child styling working untouched instead of
+        // needing a new wrapper element and CSS rule for it.
+        return `<div class="stock-item" style="flex-wrap:wrap;">
           <span class="stock-name">${item.product.name}</span>
           <span class="stock-badge ${badgeClass}">${badgeText}</span>
-          <button onclick="consumeOne(${item.product.id},this)" ${amount<=0?'disabled':''} style="margin-left:8px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;padding:4px 10px;cursor:pointer;">Used one</button>
-          <button onclick="restockOne(${item.product.id},this)" style="margin-left:6px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:12px;padding:4px 10px;cursor:pointer;">Bought a box</button>
+          <button onclick="consumeOne(${id},this)" ${amount<=0?'disabled':''} style="margin-left:8px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;padding:4px 10px;cursor:pointer;">Used one</button>
+          <button onclick="restockOne(${id},this)" style="margin-left:6px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:12px;padding:4px 10px;cursor:pointer;">Bought a box (${boxSize})</button>
+          ${consumablesConfirmRemoveId === id ? `
+            <span style="margin-left:8px;color:var(--accent4);font-size:11px;">Remove for good?</span>
+            <button onclick="confirmRemoveConsumable(${id},this)" style="margin-left:4px;background:none;border:1px solid var(--accent4);border-radius:6px;color:var(--accent4);font-size:12px;padding:4px 10px;cursor:pointer;">Yes, remove</button>
+            <button onclick="cancelRemoveConsumable()" style="margin-left:4px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;padding:4px 10px;cursor:pointer;">Cancel</button>
+          ` : `
+            <button onclick="askRemoveConsumable(${id})" style="margin-left:6px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--accent4);font-size:12px;padding:4px 10px;cursor:pointer;">Remove</button>
+          `}
+          <div style="width:100%;display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;font-size:10px;color:var(--muted);">
+            <span>Box size</span>
+            <input type="text" inputmode="numeric" id="boxsize-${id}" value="${boxSize}" style="width:42px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:3px 4px;text-align:center;">
+            <button onclick="saveBoxSize(${id},this)" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:10px;padding:3px 8px;cursor:pointer;">Save</button>
+            <span style="margin-left:6px;">Set count</span>
+            <input type="text" inputmode="numeric" id="setamount-${id}" value="${amount}" style="width:42px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:3px 4px;text-align:center;">
+            <button onclick="setAmount(${id},${amount},this)" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:10px;padding:3px 8px;cursor:pointer;">Set</button>
+            <button onclick="resetAmount(${id},${amount},this)" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:10px;padding:3px 8px;cursor:pointer;">Reset to 0</button>
+          </div>
         </div>`;
       }).join('')}`;
+    items.forEach(item => {
+      const boxInput = document.getElementById(`boxsize-${item.product.id}`);
+      const amtInput = document.getElementById(`setamount-${item.product.id}`);
+      if (boxInput) oskAttach(boxInput);
+      if (amtInput) oskAttach(amtInput);
+    });
+    if (consumablesAddOpen) {
+      ['add-consumable-name', 'add-consumable-minstock', 'add-consumable-boxsize', 'add-consumable-initial'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) oskAttach(el);
+      });
+    }
   } catch (e) {
     document.getElementById('focus-inner').innerHTML = '<div class="focus-title">Household Items</div><div class="loading">Could not load</div>';
   }
+}
+
+function toggleAddConsumable() {
+  consumablesAddOpen = !consumablesAddOpen;
+  loadConsumablesFocus();
+}
+
+// Deleting a product is irreversible (it takes its stock history with it),
+// so this always requires a second explicit tap on this specific item --
+// tapping "Remove" only arms the confirm state, it doesn't delete anything
+// by itself. A native confirm() dialog was avoided since kiosk browsers
+// don't reliably support them.
+function askRemoveConsumable(productId) {
+  consumablesConfirmRemoveId = productId;
+  loadConsumablesFocus();
+}
+
+function cancelRemoveConsumable() {
+  consumablesConfirmRemoveId = null;
+  loadConsumablesFocus();
+}
+
+async function confirmRemoveConsumable(productId, btn) {
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const res = await fetch(`/consumables/remove_product/${productId}`, { method: 'POST' });
+    const data = await res.json();
+    if (!data.success) btn.textContent = '✗';
+  } catch (e) {
+    btn.textContent = '✗';
+  }
+  consumablesConfirmRemoveId = null;
+  setTimeout(loadConsumablesFocus, 900);
+}
+
+async function submitAddConsumable(btn) {
+  const name = document.getElementById('add-consumable-name').value.trim();
+  if (!name) {
+    btn.textContent = '\u2717';
+    setTimeout(() => { btn.textContent = 'Add'; }, 1200);
+    return;
+  }
+  const minStock = parseInt(document.getElementById('add-consumable-minstock').value, 10);
+  const boxSize = parseInt(document.getElementById('add-consumable-boxsize').value, 10);
+  const initialAmount = parseFloat(document.getElementById('add-consumable-initial').value);
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const res = await fetch('/consumables/add_product', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        name,
+        min_stock: isNaN(minStock) ? 5 : minStock,
+        box_size: isNaN(boxSize) ? 1 : boxSize,
+        initial_amount: isNaN(initialAmount) ? 0 : initialAmount,
+      }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      consumablesAddOpen = false;
+    } else {
+      btn.textContent = '\u2717';
+    }
+  } catch (e) {
+    btn.textContent = '\u2717';
+  }
+  setTimeout(loadConsumablesFocus, 900);
 }
 
 async function consumeOne(productId, btn) {
@@ -512,6 +647,72 @@ async function restockOne(productId, btn) {
     btn.textContent = '✗';
   }
   setTimeout(loadConsumablesFocus, 900);
+}
+
+async function saveBoxSize(productId, btn) {
+  const input = document.getElementById(`boxsize-${productId}`);
+  const amount = parseInt(input.value, 10);
+  if (!amount || amount < 1) {
+    btn.textContent = '✗';
+    setTimeout(() => { btn.textContent = 'Save'; }, 1200);
+    return;
+  }
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const res = await fetch(`/consumables/box_size/${productId}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({amount}),
+    });
+    const data = await res.json();
+    btn.textContent = data.success ? '✓' : '✗';
+  } catch (e) {
+    btn.textContent = '✗';
+  }
+  setTimeout(loadConsumablesFocus, 900);
+}
+
+async function _postAmount(productId, amount, btn) {
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const res = await fetch(`/consumables/set_amount/${productId}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({amount}),
+    });
+    const data = await res.json();
+    btn.textContent = data.success ? '✓' : '✗';
+  } catch (e) {
+    btn.textContent = '✗';
+  }
+  setTimeout(loadConsumablesFocus, 900);
+}
+
+async function setAmount(productId, currentAmount, btn) {
+  const input = document.getElementById(`setamount-${productId}`);
+  const amount = parseFloat(input.value);
+  if (isNaN(amount) || amount < 0) {
+    btn.textContent = '✗';
+    setTimeout(() => { btn.textContent = 'Set'; }, 1200);
+    return;
+  }
+  // Grocy's inventory endpoint rejects a "correction" to the same value it
+  // already is -- treat that as an immediate no-op success rather than a
+  // round-trip that comes back as an error for doing nothing.
+  if (amount === currentAmount) {
+    btn.textContent = '✓';
+    setTimeout(() => { btn.textContent = 'Set'; }, 900);
+    return;
+  }
+  await _postAmount(productId, amount, btn);
+}
+
+async function resetAmount(productId, currentAmount, btn) {
+  if (currentAmount === 0) {
+    btn.textContent = '✓';
+    setTimeout(() => { btn.textContent = 'Reset to 0'; }, 900);
+    return;
+  }
+  await _postAmount(productId, 0, btn);
 }
 const GROCY_HEADERS = { 'GROCY-API-KEY': GROCY_KEY };
 const MEALIE_TOKEN = "YOUR_MEALIE_API_TOKEN";

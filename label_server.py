@@ -187,7 +187,15 @@ def render_label(title, subtitle=None, extra_lines=None):
     # a glyph by a pixel or two at the sizes now reachable in the wider
     # corrected canvas (invisible at the old canvas's much smaller sizes).
     EDGE_SAFETY = 4
-    max_h = LABEL_H - MARGIN * 2 - EDGE_SAFETY
+    # A real printed label (short title -> subtitle claimed most of the
+    # remaining height -> its last line clipped at the bottom edge) showed
+    # the vertical dimension has the same gap between theoretical pixel math
+    # and physical output that width already needed a percentage margin
+    # for -- growth routinely maximizes to use ~100% of max_h, which is
+    # exactly the scenario that leaves no room for that gap. A flat few-px
+    # buffer isn't enough for the same reason it wasn't enough for width.
+    HEIGHT_FIT_SAFETY = 0.92
+    max_h = (LABEL_H - MARGIN * 2 - EDGE_SAFETY) * HEIGHT_FIT_SAFETY
     max_w = LABEL_W - MARGIN * 2 - EDGE_SAFETY
 
     sub_source = list(extra_lines or [])
