@@ -2110,5 +2110,73 @@ function closeIframe() {
   document.getElementById('main-iframe').src = '';
 }
 </script>
+  <script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  if (params.has('demo')) localStorage.setItem('kitchenhub-demo', '1');
+  if (params.get('demo') === '0') localStorage.removeItem('kitchenhub-demo');
+
+  const DEMO = localStorage.getItem('kitchenhub-demo') === '1';
+  window.toggleDemoMode = () => {
+    localStorage.setItem('kitchenhub-demo', DEMO ? '0' : '1');
+    location.reload();
+  };
+  if (!DEMO) return;
+
+  const CAMERA_PATH = /\/camera\//i;
+  const PLACEHOLDER =
+    'data:image/svg+xml;base64,' + btoa(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="225">' +
+      '<rect width="100%" height="100%" fill="#111"/>' +
+      '<text x="50%" y="50%" fill="#666" font-family="monospace" font-size="14" ' +
+      'text-anchor="middle" dominant-baseline="middle">DEMO MODE — FEED HIDDEN</text>' +
+      '</svg>'
+    );
+
+  const origFetch = window.fetch;
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : input.url;
+    if (url && CAMERA_PATH.test(url)) {
+      return Promise.resolve(new Response(new Blob(), { status: 200 }));
+    }
+    return origFetch.call(this, input, init);
+  };
+
+  function scrub(el) {
+    if (!el.tagName) return;
+    const src = el.src || el.currentSrc || '';
+    if (['IMG', 'VIDEO', 'SOURCE'].includes(el.tagName) && CAMERA_PATH.test(src)) {
+      el.src = PLACEHOLDER;
+    }
+    const bg = el.style && el.style.backgroundImage;
+    if (bg && CAMERA_PATH.test(bg)) {
+      el.style.backgroundImage = `url("${PLACEHOLDER}")`;
+    }
+  }
+  document.querySelectorAll('*').forEach(scrub);
+  new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      m.addedNodes.forEach((n) => {
+        if (n.nodeType !== 1) return;
+        scrub(n);
+        n.querySelectorAll?.('*').forEach(scrub);
+      });
+      if (m.type === 'attributes') scrub(m.target);
+    }
+  }).observe(document.body, {
+    childList: true, subtree: true, attributes: true,
+    attributeFilter: ['src', 'style'],
+  });
+
+  const badge = document.createElement('div');
+  badge.textContent = 'DEMO MODE';
+  badge.style.cssText =
+    'position:fixed;top:8px;right:8px;z-index:99999;background:#e8ff00;' +
+    'color:#000;font:bold 11px monospace;padding:4px 8px;border-radius:3px;' +
+    'letter-spacing:0.1em;';
+  document.addEventListener('DOMContentLoaded', () => document.body.appendChild(badge));
+  if (document.body) document.body.appendChild(badge);
+})();
+</script>
 </body>
 </html>
