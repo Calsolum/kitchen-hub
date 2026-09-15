@@ -1928,12 +1928,32 @@ const SECURITY_CAMERAS = [
 ];
 const SECURITY_CAMERA_ICON = `<svg class="security-tile-icon" viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`;
 
+// Shared with the demo-mode script further down this file (a later
+// <script> block that can't be relied on to have run yet the first time
+// this one executes). Defined here because securityTileHTML must never
+// put the real camera URL into the DOM at all when demo mode is on --
+// swapping img.src after insertion (which is what the later demo-mode
+// script also does defensively, via a MutationObserver) is too late on
+// its own: a browser starts fetching an <img src> the instant it's parsed
+// into the document, before any observer callback (a microtask) runs.
+const DEMO_CAMERA_PLACEHOLDER = 'data:image/svg+xml;base64,' + btoa(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="225">' +
+  '<rect width="100%" height="100%" fill="#111"/>' +
+  '<text x="50%" y="50%" fill="#666" font-family="monospace" font-size="14" ' +
+  'text-anchor="middle" dominant-baseline="middle">DEMO MODE - FEED HIDDEN</text>' +
+  '</svg>'
+);
+function isDemoMode() {
+  try { return localStorage.getItem('kitchenhub-demo') === '1'; } catch (e) { return false; }
+}
+
 function securityTileHTML(cam) {
   if (!cam.src) {
     return `<div class="security-tile">${SECURITY_CAMERA_ICON}<div class="security-tile-label">${cam.label}</div><div class="security-tile-status">Not connected</div></div>`;
   }
+  const src = isDemoMode() ? DEMO_CAMERA_PLACEHOLDER : cam.src;
   return `<div class="security-tile live" id="security-tile-${cam.id}">
-    <img src="${cam.src}" alt="${cam.label} camera" draggable="false" onerror="document.getElementById('security-tile-${cam.id}').classList.add('feed-error')">
+    <img src="${src}" alt="${cam.label} camera" draggable="false" onerror="document.getElementById('security-tile-${cam.id}').classList.add('feed-error')">
     <div class="security-tile-label">${cam.label}</div>
   </div>`;
 }
@@ -2124,14 +2144,7 @@ function closeIframe() {
   if (!DEMO) return;
 
   const CAMERA_PATH = /\/camera\//i;
-  const PLACEHOLDER =
-    'data:image/svg+xml;base64,' + btoa(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="225">' +
-      '<rect width="100%" height="100%" fill="#111"/>' +
-      '<text x="50%" y="50%" fill="#666" font-family="monospace" font-size="14" ' +
-      'text-anchor="middle" dominant-baseline="middle">DEMO MODE — FEED HIDDEN</text>' +
-      '</svg>'
-    );
+  const PLACEHOLDER = DEMO_CAMERA_PLACEHOLDER; // shared with securityTileHTML() above
 
   const origFetch = window.fetch;
   window.fetch = function (input, init) {
