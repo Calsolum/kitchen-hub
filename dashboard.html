@@ -460,6 +460,7 @@ const CONSUMABLES_GROUP_ID = 14; // Grocy product group "Household Consumables" 
 
 let consumablesAddOpen = false;
 let consumablesConfirmRemoveId = null;
+let consumablesOpenId = null;
 
 async function loadConsumablesFocus() {
   document.getElementById('focus-inner').innerHTML = '<div class="focus-title">Household Items</div><div class="loading">Loading...</div>';
@@ -513,27 +514,38 @@ async function loadConsumablesFocus() {
         // .stock-item, not a sibling element -- keeps the existing
         // border-bottom/:last-child styling working untouched instead of
         // needing a new wrapper element and CSS rule for it.
+        const isOpen = consumablesOpenId === id;
+        // Only "Used one" (the action used almost every time) and the small
+        // toggle stay always visible -- the box-size/set-count/remove
+        // controls used rarely are worth reading past every time otherwise,
+        // so they only render into the DOM when this item's drawer is open.
         return `<div class="stock-item" style="flex-wrap:wrap;">
           <span class="stock-name">${item.product.name}</span>
           <span class="stock-badge ${badgeClass}">${badgeText}</span>
           <button onclick="consumeOne(${id},this)" ${amount<=0?'disabled':''} style="margin-left:8px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;padding:4px 10px;cursor:pointer;">Used one</button>
-          <button onclick="restockOne(${id},this)" style="margin-left:6px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:12px;padding:4px 10px;cursor:pointer;">Bought a box (${boxSize})</button>
-          ${consumablesConfirmRemoveId === id ? `
-            <span style="margin-left:8px;color:var(--accent4);font-size:11px;">Remove for good?</span>
-            <button onclick="confirmRemoveConsumable(${id},this)" style="margin-left:4px;background:none;border:1px solid var(--accent4);border-radius:6px;color:var(--accent4);font-size:12px;padding:4px 10px;cursor:pointer;">Yes, remove</button>
-            <button onclick="cancelRemoveConsumable()" style="margin-left:4px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;padding:4px 10px;cursor:pointer;">Cancel</button>
-          ` : `
-            <button onclick="askRemoveConsumable(${id})" style="margin-left:6px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--accent4);font-size:12px;padding:4px 10px;cursor:pointer;">Remove</button>
-          `}
-          <div style="width:100%;display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;font-size:10px;color:var(--muted);">
-            <span>Box size</span>
-            <input type="text" inputmode="numeric" id="boxsize-${id}" value="${boxSize}" style="width:42px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:3px 4px;text-align:center;">
-            <button onclick="saveBoxSize(${id},this)" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:10px;padding:3px 8px;cursor:pointer;">Save</button>
-            <span style="margin-left:6px;">Set count</span>
-            <input type="text" inputmode="numeric" id="setamount-${id}" value="${amount}" style="width:42px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:3px 4px;text-align:center;">
-            <button onclick="setAmount(${id},${amount},this)" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:10px;padding:3px 8px;cursor:pointer;">Set</button>
-            <button onclick="resetAmount(${id},${amount},this)" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:10px;padding:3px 8px;cursor:pointer;">Reset to 0</button>
-          </div>
+          <button onclick="toggleConsumableDrawer(${id})" aria-label="More actions" style="margin-left:6px;width:28px;height:28px;flex:none;background:none;border:1px solid var(--border);border-radius:6px;color:${isOpen ? 'var(--text)' : 'var(--muted)'};font-size:14px;line-height:1;cursor:pointer;">&#8943;</button>
+          ${!isOpen ? '' : `<div style="width:100%;display:flex;flex-direction:column;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:10px;color:var(--muted);">
+            <div>
+              <button onclick="restockOne(${id},this)" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:12px;padding:4px 10px;cursor:pointer;">Bought a box (${boxSize})</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <span>Box size</span>
+              <input type="text" inputmode="numeric" id="boxsize-${id}" value="${boxSize}" style="width:42px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:3px 4px;text-align:center;">
+              <button onclick="saveBoxSize(${id},this)" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:10px;padding:3px 8px;cursor:pointer;">Save</button>
+              <span style="margin-left:6px;">Set count</span>
+              <input type="text" inputmode="numeric" id="setamount-${id}" value="${amount}" style="width:42px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:3px 4px;text-align:center;">
+              <button onclick="setAmount(${id},${amount},this)" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:10px;padding:3px 8px;cursor:pointer;">Set</button>
+            </div>
+            <div>
+              ${consumablesConfirmRemoveId === id ? `
+                <span style="color:var(--accent4);font-size:11px;">Remove for good?</span>
+                <button onclick="confirmRemoveConsumable(${id},this)" style="margin-left:4px;background:none;border:1px solid var(--accent4);border-radius:6px;color:var(--accent4);font-size:12px;padding:4px 10px;cursor:pointer;">Yes, remove</button>
+                <button onclick="cancelRemoveConsumable()" style="margin-left:4px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;padding:4px 10px;cursor:pointer;">Cancel</button>
+              ` : `
+                <button onclick="askRemoveConsumable(${id})" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--accent4);font-size:12px;padding:4px 10px;cursor:pointer;">Remove</button>
+              `}
+            </div>
+          </div>`}
         </div>`;
       }).join('')}`;
     items.forEach(item => {
@@ -706,13 +718,10 @@ async function setAmount(productId, currentAmount, btn) {
   await _postAmount(productId, amount, btn);
 }
 
-async function resetAmount(productId, currentAmount, btn) {
-  if (currentAmount === 0) {
-    btn.textContent = '✓';
-    setTimeout(() => { btn.textContent = 'Reset to 0'; }, 900);
-    return;
-  }
-  await _postAmount(productId, 0, btn);
+function toggleConsumableDrawer(id) {
+  consumablesOpenId = consumablesOpenId === id ? null : id;
+  consumablesConfirmRemoveId = null;
+  loadConsumablesFocus();
 }
 const GROCY_HEADERS = { 'GROCY-API-KEY': GROCY_KEY };
 const MEALIE_TOKEN = "YOUR_MEALIE_API_TOKEN";
