@@ -5,6 +5,7 @@ calendar_credentials.json
 calendar_token.json
 *.crt
 *.key
+config.local.js
 
 # Runtime data
 grocy-data/

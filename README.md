@@ -6,6 +6,8 @@ Everything runs locally — no cloud dependency for the core features, no subscr
 
 ![Kitchen Hub dashboard](screenshot.png)
 
+*Screenshots for this README must be captured with `?demo=1` appended to the dashboard URL — it hides the live security camera feeds behind a placeholder before anything is requested, so no real footage ends up in a public repo.*
+
 ## What it does
 
 - **Inventory tracking** via [Grocy](https://grocy.info/) — stock levels, expiry alerts, shopping list, all synced to a touch-friendly summary view
@@ -91,13 +93,14 @@ A few things that came up building this that might be useful if you're doing som
 This isn't a one-click deploy — it's tuned to specific hardware (a Raspberry Pi 5, a particular touchscreen, a Wayland kiosk session) and personal accounts (Grocy, Mealie, Google Calendar). Treat it as a reference, not a template.
 
 1. Copy `.env.example` to `.env` and fill in your own Grocy/Mealie/YouTube credentials.
-2. `docker compose up -d` to bring up Grocy, Mealie, whisper, nginx, and Home Assistant.
-3. Serve `dashboard.html` with any static file server on the host (a one-line `python -m http.server` works fine).
-4. Point nginx at your own TLS cert (a self-signed one is fine for a LAN-only setup) and hostname.
-5. For voice commands to work, `EMERGENCY_FOOD_GROUP_ID` and the Grocy API key in `dashboard.html` need to match your own Grocy instance.
-6. Launch Chromium in kiosk mode pointed at your nginx host — see the comments in `dashboard.html` and the architecture diagram above for how the pieces fit together.
-7. Label printing (optional) needs a Niimbot BLE printer, [NiimPrintX](https://github.com/labbots/NiimPrintX) cloned locally, and `label_server.py`'s own Grocy API key filled in. NiimPrintX's upstream `bluetooth.py` and `printer.py` needed several fixes for this printer model — see the reverse-engineering note above — so expect to patch a fresh clone rather than using it as-is.
-8. Household consumables tracking (optional) needs its own Grocy product group and products created first (see `consumables_server.py`'s `BOX_SIZES` map for the expected product ids), and `CONSUMABLES_GROUP_ID` in `dashboard.html` set to match.
+2. Copy `config.local.example.js` to `config.local.js` (same directory as `dashboard.html`) and fill in your Grocy API key, Mealie token, and OpenWeatherMap key. It's gitignored and loaded by `dashboard.html` at runtime, so the deployed page never has to be hand-edited or hand-redacted again — pulling a fresh `dashboard.html` from the repo can't overwrite it, since the two live in separate files.
+3. `docker compose up -d` to bring up Grocy, Mealie, whisper, nginx, and Home Assistant.
+4. Serve `dashboard.html` with any static file server on the host (a one-line `python -m http.server` works fine).
+5. Point nginx at your own TLS cert (a self-signed one is fine for a LAN-only setup) and hostname.
+6. For voice commands to work, `EMERGENCY_FOOD_GROUP_ID` in `dashboard.html` needs to match your own Grocy instance.
+7. Launch Chromium in kiosk mode pointed at your nginx host — see the comments in `dashboard.html` and the architecture diagram above for how the pieces fit together.
+8. Label printing (optional) needs a Niimbot BLE printer, [NiimPrintX](https://github.com/labbots/NiimPrintX) cloned locally, and `label_server.py`'s own Grocy API key filled in. NiimPrintX's upstream `bluetooth.py` and `printer.py` needed several fixes for this printer model — see the reverse-engineering note above — so expect to patch a fresh clone rather than using it as-is.
+9. Household consumables tracking (optional) needs its own Grocy product group and products created first (see `consumables_server.py`'s `BOX_SIZES` map for the expected product ids), and `CONSUMABLES_GROUP_ID` in `dashboard.html` set to match.
 
 ## License
 

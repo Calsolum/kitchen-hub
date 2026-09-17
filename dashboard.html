@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kitchen Hub</title>
+<!-- config.local.js is gitignored and lives only on this host -- it defines
+     window.KITCHEN_CONFIG with the real API keys used below. A missing
+     file just leaves window.KITCHEN_CONFIG undefined (a script 404 doesn't
+     throw), so the placeholder strings below still apply for anyone who
+     hasn't set one up. See config.local.example.js in the repo. -->
+<script src="config.local.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -453,7 +459,7 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
 </div>
 
 <script>
-const GROCY_KEY = "YOUR_GROCY_API_KEY";
+const GROCY_KEY = window.KITCHEN_CONFIG?.GROCY_KEY || "YOUR_GROCY_API_KEY";
 const GROCY_URL = "";
 const EMERGENCY_FOOD_GROUP_ID = 13; // Grocy product group "Emergency Food" -- ready-to-eat grab-and-go items
 const CONSUMABLES_GROUP_ID = 14; // Grocy product group "Household Consumables" -- garbage bags, filters, detergent pods, etc.
@@ -724,7 +730,7 @@ function toggleConsumableDrawer(id) {
   loadConsumablesFocus();
 }
 const GROCY_HEADERS = { 'GROCY-API-KEY': GROCY_KEY };
-const MEALIE_TOKEN = "YOUR_MEALIE_API_TOKEN";
+const MEALIE_TOKEN = window.KITCHEN_CONFIG?.MEALIE_TOKEN || "YOUR_MEALIE_API_TOKEN";
 const MEALIE_URL = "/mealie";
 const CALORIE_LIMIT = 2000;
 const ICON_MIC = '<svg viewBox="0 0 24 24" class="icon icon-inline" style="width:0.75em;height:0.75em;"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
@@ -1624,7 +1630,7 @@ function rotatePhoto() {
 }
 setInterval(rotatePhoto, 1800000);
 
-const WEATHER_KEY = "YOUR_OPENWEATHERMAP_API_KEY";
+const WEATHER_KEY = window.KITCHEN_CONFIG?.WEATHER_KEY || "YOUR_OPENWEATHERMAP_API_KEY";
 const WEATHER_LAT = "43.7315";
 const WEATHER_LON = "-79.7624";
 
