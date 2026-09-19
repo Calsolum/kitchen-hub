@@ -399,6 +399,10 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
           <div class="action-label">Household Items</div>
           <div class="action-sub">Track supplies</div>
         </div>
+        <div class="action-btn" onclick="openFocus('scan')">
+          <div class="action-label">Scan Barcode</div>
+          <div class="action-sub">Consume or restock</div>
+        </div>
       </div>
     </div>
     <div class="card" onclick="openFocus('flipp')">
@@ -436,11 +440,11 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
       <div class="ticker-content">
         <div class="ticker-item"><b>Kitchen Hub</b> — Live data from Grocy and Mealie</div>
         <div class="ticker-item">Hatsune Miku and characters &copy; Crypton Future Media, INC., licensed under CC BY-NC 3.0</div>
-        <div class="ticker-item"><b>Tip</b> — Scan barcodes in Grocy to update stock instantly</div>
+        <div class="ticker-item"><b>Tip</b> — Scan barcodes right from the dashboard — Quick Actions → Scan Barcode</div>
         <div class="ticker-item"><b>Tip</b> — Tap any card to expand fullscreen</div>
         <div class="ticker-item"><b>Tip</b> — Swipe left for shopping · right for stock · up to cook</div>
         <div class="ticker-item"><b>Kitchen Hub</b> — Live data from Grocy and Mealie</div>
-        <div class="ticker-item"><b>Tip</b> — Scan barcodes in Grocy to update stock instantly</div>
+        <div class="ticker-item"><b>Tip</b> — Scan barcodes right from the dashboard — Quick Actions → Scan Barcode</div>
         <div class="ticker-item"><b>Tip</b> — Tap any card to expand fullscreen</div>
         <div class="ticker-item"><b>Tip</b> — Swipe left for shopping · right for stock · up to cook</div>
       </div>
@@ -729,6 +733,163 @@ function toggleConsumableDrawer(id) {
   consumablesConfirmRemoveId = null;
   loadConsumablesFocus();
 }
+
+// ---------- Barcode scanning ----------
+// A USB scanner in HID-keyboard-emulation mode just types the barcode
+// digits + Enter into whatever currently has focus -- there's no separate
+// "scan" event to listen for. scanCaptureActive scopes the hidden input's
+// defensive refocus-on-blur to only while this focus view is open, so it
+// never fights the oskAttach/oskTarget contract every other input on this
+// dashboard relies on.
+let scanCaptureActive = false;
+let scanMode = 'consume';
+try { scanMode = localStorage.getItem('kitchenhub-scan-mode') || 'consume'; } catch (e) {}
+let scanNewGroup = null;
+
+function setScanMode(mode) {
+  scanMode = mode;
+  try { localStorage.setItem('kitchenhub-scan-mode', mode); } catch (e) {}
+  loadScanFocus();
+}
+
+function loadScanFocus() {
+  document.getElementById('focus-inner').innerHTML = `
+    <div class="focus-title">Scan Barcode</div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <button class="video-tab ${scanMode==='consume'?'active':''}" onclick="setScanMode('consume')">Consuming</button>
+      <button class="video-tab ${scanMode==='restock'?'active':''}" onclick="setScanMode('restock')">Restocking</button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">
+      Point the scanner at a barcode. Each scan ${scanMode==='consume'?'consumes':'adds'} one unit.
+    </div>
+    <input type="text" id="scan-capture-input" autocomplete="off" inputmode="none"
+           style="position:absolute;left:-9999px;top:-9999px;">
+    <div id="scan-unknown-panel" style="display:none;margin-bottom:14px;"></div>
+    <div id="scan-feedback"></div>`;
+
+  const input = document.getElementById('scan-capture-input');
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const v = input.value.trim();
+      input.value = '';
+      if (v) handleScan(v);
+    }
+  });
+  input.addEventListener('blur', () => {
+    if (scanCaptureActive) setTimeout(() => input.focus(), 50);
+  });
+  input.focus();
+}
+
+function prependScanRow(id, barcode) {
+  const row = document.createElement('div');
+  row.id = id;
+  row.className = 'stock-item';
+  row.innerHTML = `<span class="stock-name">Looking up ${barcode}...</span><span class="stock-badge">...</span>`;
+  document.getElementById('scan-feedback').prepend(row);
+}
+
+function updateScanRow(id, ok, text) {
+  const row = document.getElementById(id);
+  if (!row) return;
+  row.querySelector('.stock-badge').className = 'stock-badge ' + (ok ? 'ok' : 'out');
+  row.querySelector('.stock-badge').textContent = ok ? '✓' : '✗';
+  row.querySelector('.stock-name').textContent = text;
+}
+
+async function handleScan(barcode) {
+  const rowId = 'scan-row-' + Date.now();
+  prependScanRow(rowId, barcode);
+  try {
+    const res = await fetch('/scan/action', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ barcode, mode: scanMode }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      updateScanRow(rowId, false, `Error: ${data.error || 'unknown'}`);
+      return;
+    }
+    if (!data.found) {
+      updateScanRow(rowId, false, `Unknown barcode ${barcode} — link it below`);
+      showUnknownBarcodePanel(barcode);
+      return;
+    }
+    const verb = scanMode === 'consume' ? 'Consumed' : 'Added';
+    updateScanRow(rowId, true, `${data.product.name} — ${verb} 1, now ${data.new_stock}`);
+  } catch (e) {
+    updateScanRow(rowId, false, 'Network error');
+  }
+}
+
+async function showUnknownBarcodePanel(barcode) {
+  const products = await grocyGet('objects/products');
+  const panel = document.getElementById('scan-unknown-panel');
+  panel.style.display = 'block';
+  scanNewGroup = null;
+  panel.innerHTML = `
+    <div style="border:1px solid var(--border);border-radius:12px;padding:12px;">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Link barcode <b>${barcode}</b> to:</div>
+      <input type="text" id="scan-link-search" placeholder="Search existing products..."
+             style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;padding:6px 8px;margin-bottom:8px;box-sizing:border-box;">
+      <div id="scan-link-results" style="max-height:120px;overflow-y:auto;margin-bottom:10px;"></div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">...or create a new product:</div>
+      <input type="text" id="scan-new-name" placeholder="New product name"
+             style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;padding:6px 8px;margin-bottom:6px;box-sizing:border-box;">
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <button class="video-tab" onclick="scanNewGroup=${CONSUMABLES_GROUP_ID}">Household</button>
+        <button class="video-tab" onclick="scanNewGroup=${EMERGENCY_FOOD_GROUP_ID}">Emergency Food</button>
+        <button class="video-tab" onclick="scanNewGroup=null">No group</button>
+      </div>
+      <button onclick="submitNewProductLink('${barcode}', this)" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:12px;padding:5px 12px;cursor:pointer;">Create &amp; Link</button>
+      <button onclick="cancelUnknownBarcode()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;padding:5px 12px;cursor:pointer;margin-left:6px;">Cancel</button>
+    </div>`;
+  oskAttach(document.getElementById('scan-link-search'));
+  oskAttach(document.getElementById('scan-new-name'));
+  document.getElementById('scan-link-search').addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    const matches = q.length < 2 ? [] : products.filter(p => p.name.toLowerCase().includes(q)).slice(0, 8);
+    document.getElementById('scan-link-results').innerHTML = matches.map(p =>
+      `<div onclick="submitExistingLink('${barcode}', ${p.id})" style="padding:6px 8px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--border);">${p.name}</div>`
+    ).join('');
+  });
+}
+
+async function submitExistingLink(barcode, productId) {
+  await _registerBarcode({ barcode, product_id: productId });
+}
+
+async function submitNewProductLink(barcode, btn) {
+  const name = document.getElementById('scan-new-name').value.trim();
+  if (!name) return;
+  btn.disabled = true;
+  btn.textContent = '...';
+  await _registerBarcode({ barcode, new_product_name: name, product_group_id: scanNewGroup });
+}
+
+async function _registerBarcode(body) {
+  try {
+    const res = await fetch('/scan/register', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.success) {
+      cancelUnknownBarcode();
+      // The user scanned this barcode for a reason -- fulfill the original
+      // consume/restock intent immediately rather than making them scan twice.
+      handleScan(body.barcode);
+    }
+  } catch (e) { /* leave the panel open so they can retry */ }
+}
+
+function cancelUnknownBarcode() {
+  const panel = document.getElementById('scan-unknown-panel');
+  if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+  const input = document.getElementById('scan-capture-input');
+  if (input) input.focus();
+}
+
 const GROCY_HEADERS = { 'GROCY-API-KEY': GROCY_KEY };
 const MEALIE_TOKEN = window.KITCHEN_CONFIG?.MEALIE_TOKEN || "YOUR_MEALIE_API_TOKEN";
 const MEALIE_URL = "/mealie";
@@ -1291,6 +1452,7 @@ function loadFullExpiry() {
 
 function openFocus(type) {
   document.getElementById('focus-overlay').classList.add('active');
+  scanCaptureActive = false;
   if (type==='cook') loadCookTonight();
   else if (type==='stock') loadFullStock();
   else if (type==='shopping') loadFullShopping();
@@ -1303,6 +1465,7 @@ function openFocus(type) {
   else if (type==='emergency') loadEmergencyFoodFocus();
   else if (type==='label') loadLabelPrinter();
   else if (type==='consumables') loadConsumablesFocus();
+  else if (type==='scan') { scanCaptureActive = true; loadScanFocus(); }
 }
 
 const FLIPP_POSTAL = "L6P1A1"; // Update with your postal code
@@ -1473,7 +1636,7 @@ async function loadVoiceHistory() {
   }
 }
 
-function closeFocus() { document.getElementById('focus-overlay').classList.remove('active'); document.getElementById('osk').classList.remove('active'); oskTarget = null; }
+function closeFocus() { document.getElementById('focus-overlay').classList.remove('active'); document.getElementById('osk').classList.remove('active'); oskTarget = null; scanCaptureActive = false; }
 document.getElementById('focus-overlay').addEventListener('click', function(e) { if (e.target===this) closeFocus(); });
 let mediaRecorder = null;
 let audioChunks = [];
