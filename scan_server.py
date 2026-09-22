@@ -65,6 +65,21 @@ def scan_action():
         # reintroduce consumables_server.py's BOX_SIZES-style bulk quantity,
         # since it doesn't generalize to an arbitrary scanned food product.
         if mode == "consume":
+            # A brand-new product just linked via /register (or any product Grocy currently
+            # has at 0) has nothing to consume yet -- Grocy's own consume endpoint rejects
+            # that with a 400, which is correct behavior on Grocy's part, but not what a
+            # physical scan means here: the item is in the scanner's hand right now, so it
+            # existed a moment ago. Add 1 first so the consume that follows actually has
+            # stock to draw down (net effect: stays at 0, but both a purchase and a
+            # consumption transaction land in Grocy's history instead of a hard error).
+            if float(product.get("stock_amount") or 0) < 1:
+                r0 = requests.post(
+                    f"{GROCY_URL}/api/stock/products/{product_id}/add",
+                    headers=HEADERS,
+                    json={"amount": 1, "transaction_type": "purchase"},
+                    verify=False, timeout=10,
+                )
+                r0.raise_for_status()
             r = requests.post(
                 f"{GROCY_URL}/api/stock/products/{product_id}/consume",
                 headers=HEADERS,
