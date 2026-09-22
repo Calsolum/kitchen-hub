@@ -302,6 +302,9 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
     <div class="osk-key wide" id="osk-shift-key" onclick="oskShift()">&#8679;</div><div class="osk-key" data-letter onclick="oskPress('z')">z</div><div class="osk-key" data-letter onclick="oskPress('x')">x</div><div class="osk-key" data-letter onclick="oskPress('c')">c</div><div class="osk-key" data-letter onclick="oskPress('v')">v</div><div class="osk-key" data-letter onclick="oskPress('b')">b</div><div class="osk-key" data-letter onclick="oskPress('n')">n</div><div class="osk-key" data-letter onclick="oskPress('m')">m</div><div class="osk-key wide" onclick="oskBackspace()">&#9003;</div>
   </div>
   <div class="osk-row">
+    <div class="osk-key" onclick="oskPress('%')">%</div><div class="osk-key" onclick="oskPress('&amp;')">&amp;</div><div class="osk-key" onclick="oskPress('&#39;')">&#39;</div><div class="osk-key" onclick="oskPress('-')">-</div><div class="osk-key" onclick="oskPress('.')">.</div><div class="osk-key" onclick="oskPress(',')">,</div><div class="osk-key" onclick="oskPress(':')">:</div><div class="osk-key" onclick="oskPress('/')">/</div><div class="osk-key" onclick="oskPress('(')">(</div><div class="osk-key" onclick="oskPress(')')">)</div>
+  </div>
+  <div class="osk-row">
     <div class="osk-key space" onclick="oskPress(' ')">space</div><div class="osk-key wide" onclick="oskDone()">Done</div>
   </div>
 </div>
@@ -4114,10 +4117,15 @@ function oskPress(ch) {
   // typo anywhere but the very end without retyping everything after it.
   const start = el.selectionStart ?? el.value.length;
   const end = el.selectionEnd ?? el.value.length;
-  const insert = oskCaps ? ch.toUpperCase() : ch;
+  const isLetter = /[a-z]/i.test(ch);
+  const insert = (oskCaps && isLetter) ? ch.toUpperCase() : ch;
   el.value = el.value.slice(0, start) + insert + el.value.slice(end);
   el.setSelectionRange(start + insert.length, start + insert.length);
   el.dispatchEvent(new Event('input', {bubbles:true}));
+  // Shift is one-shot (like a phone keyboard, not Caps Lock) -- capitalizes exactly the
+  // next letter typed, then turns itself back off. Only a letter key consumes it; numbers/
+  // symbols/space/backspace shouldn't silently cancel a shift tap the user hasn't used yet.
+  if (oskCaps && isLetter) { oskCaps = false; updateOskShiftVisual(); }
 }
 function oskBackspace() {
   if (!oskTarget) return;
@@ -4136,6 +4144,9 @@ function oskBackspace() {
 }
 function oskShift() {
   oskCaps = !oskCaps;
+  updateOskShiftVisual();
+}
+function updateOskShiftVisual() {
   document.querySelectorAll('.osk-key[data-letter]').forEach(k => {
     k.textContent = oskCaps ? k.textContent.toUpperCase() : k.textContent.toLowerCase();
   });
