@@ -2792,6 +2792,21 @@ const CONSUMABLES_GROUP_ID = 14; // Grocy product group "Household Consumables" 
 // return the full dashboard, unconditionally.
 const GUEST_MODE = new URLSearchParams(location.search).has('guest');
 
+// Declared here (not down in the "Sleep mode" section below, where these conceptually belong)
+// because refreshAll() -- defined and CALLED further down, but still earlier in this same
+// script than the Sleep mode section -- reads `sleepMode`. A `let` binding is in the temporal
+// dead zone from the top of its enclosing script until its declaration line actually runs, so
+// referencing it from a function invoked before that point throws `ReferenceError: Cannot
+// access 'sleepMode' before initialization`, even though the function itself was already
+// defined. Confirmed this was silently happening on every single page load (caught as an
+// unhandled promise rejection since refreshAll is async, and self-healing 5 minutes later once
+// setInterval's next tick runs after sleepMode has initialized) -- moved the declarations up
+// here to fix it at the source instead of relying on that timing accident.
+let sleepMode = false;
+let lastActivityTime = Date.now();
+const INACTIVITY_SLEEP_MS = 10 * 60 * 1000; // 10 minutes idle
+const TEMP_SLEEP_THRESHOLD = 65; // deg C -- lowered 2026-08-31 after the Official Active Cooler was installed and confirmed working (idle ~46C, stress-tested peak ~56.5C under sustained full load); the old 80C threshold was tuned to the pre-cooler 76-79C baseline and stopped being a meaningful safety net once idle dropped ~30C
+
 let consumablesAddOpen = false;
 let consumablesConfirmRemoveId = null;
 let consumablesOpenId = null;
@@ -4823,10 +4838,8 @@ makeDraggable(document.getElementById('voice-btn'), 'kitchenhub-voicebtn-pos');
 makeDraggable(document.getElementById('timer-fab'), 'kitchenhub-timerfab-pos');
 
 // ---------- Sleep mode (reduce heat: inactivity, temperature, or manual) ----------
-let sleepMode = false;
-let lastActivityTime = Date.now();
-const INACTIVITY_SLEEP_MS = 10 * 60 * 1000; // 10 minutes idle
-const TEMP_SLEEP_THRESHOLD = 65; // deg C -- lowered 2026-08-31 after the Official Active Cooler was installed and confirmed working (idle ~46C, stress-tested peak ~56.5C under sustained full load); the old 80C threshold was tuned to the pre-cooler 76-79C baseline and stopped being a meaningful safety net once idle dropped ~30C
+// sleepMode / lastActivityTime / INACTIVITY_SLEEP_MS / TEMP_SLEEP_THRESHOLD are declared near
+// the top of this script now, not here -- see the comment there for why.
 
 function markActivity() {
   lastActivityTime = Date.now();
