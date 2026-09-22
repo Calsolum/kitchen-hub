@@ -129,12 +129,19 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 .cal-bar-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
 .cal-bar-fill { height: 100%; border-radius: 3px; transition: width 1s ease; }
 .cal-ok { background: var(--accent); } .cal-warn { background: var(--accent3); } .cal-over { background: var(--accent4); }
-.action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.action-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 10px; cursor: pointer; transition: all 0.3s; text-align: left; }
+.action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+/* This card's fixed height (matched to its siblings in the same main-grid row, per the
+   established row-height-matching CSS Grid behavior documented elsewhere in this file) no
+   longer fits all Quick Actions tiles now that there are 10 of them -- the card was
+   silently clipping the last row (Scan Barcode / Guest Mode / Guest Requests) with no way
+   to reach it. Scroll within the card instead of resizing it, so this row's shared height
+   with Stock Status / Shopping List is untouched. */
+.quick-actions-card { overflow-y: auto; }
+.action-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 7px 10px; cursor: pointer; transition: all 0.3s; text-align: left; }
 .action-btn:hover { border-color: var(--accent); transform: translateY(-2px); }
-.action-icon { font-size: 18px; margin-bottom: 5px; width: 28px; height: 28px; }
-.action-label { font-size: 11px; color: var(--text); }
-.action-sub { font-size: 9px; color: var(--muted); margin-top: 1px; }
+.action-icon { font-size: 14px; margin-bottom: 2px; width: 20px; height: 20px; }
+.action-label { font-size: 10px; color: var(--text); line-height: 1.2; }
+.action-sub { font-size: 8px; color: var(--muted); margin-top: 0; }
 .video-card { display: flex; flex-direction: column; }
 .video-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
 .video-tab { font-size: 9px; padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s; }
@@ -369,7 +376,7 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
         <div id="emergency-food"></div>
       </div>
     </div>
-    <div class="card">
+    <div class="card quick-actions-card">
       <div class="card-label">Quick Actions</div>
       <div class="action-grid">
         <div class="action-btn" onclick="openFocus('cook')">
