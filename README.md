@@ -12,6 +12,8 @@ Everything runs locally — no cloud dependency for the core features, no subscr
 
 - **Inventory tracking** via [Grocy](https://grocy.info/) — stock levels, expiry alerts, shopping list, all synced to a touch-friendly summary view
 - **Recipes** via [Mealie](https://mealie.io/) — "what can I cook tonight?" checks your actual stock against saved recipes
+- **What Can I Make?** — a tabbed Kitchen/Bar/Coffee view; Bar and Coffee use Grocy's own native recipe engine for exact, amount-aware fulfillment ("ready to make" vs. "missing: lime, mint"), not fuzzy matching
+- **Guest Mode** — a QR code (and an NFC-tag-writable link) opens a stripped-down page showing only the bar, coffee station, and emergency food, so a guest never sees the full dashboard or any camera feed. Guests can also leave a pre-arrival request (pick a recipe or write a note) that shows up as a badge on the host's dashboard
 - **Emergency Food** — a dedicated view for already-prepared, grab-and-go items (the kind of thing you eat when you're too tired to cook), tagged directly in Grocy
 - **Household consumables tracker** — garbage bags, coffee filters, detergent pods and the like, tracked the same way Grocy tracks food: tap "Used one" to decrement, "Bought a box" to restock, and it lands on the shopping list automatically the moment it drops below its threshold — no separate spreadsheet or app for things that aren't groceries but still run out
 - **Voice commands** — a local [faster-whisper](https://github.com/SYSTRAN/faster-whisper) transcription server turns spoken commands like *"I used two eggs"* or *"add milk to the shopping list"* into real Grocy API calls, entirely on-device, no cloud speech API
