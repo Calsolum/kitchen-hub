@@ -3111,6 +3111,11 @@ function loadScanFocus() {
     <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">
       Point the scanner at a barcode. Each scan ${scanMode==='consume'?'consumes':'adds'} one unit.
     </div>
+    <button class="video-choose-btn" id="scan-camera-toggle" onclick="toggleCameraScan()" style="margin-bottom:12px;">Scan with Camera</button>
+    <div id="scan-camera-view" style="display:none;margin-bottom:14px;">
+      <video id="scan-camera-video" autoplay playsinline muted style="width:100%;border-radius:10px;background:#000;display:block;"></video>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px;text-align:center;">Point the camera at a barcode</div>
+    </div>
     <input type="text" id="scan-capture-input" autocomplete="off" inputmode="none"
            style="position:absolute;left:-9999px;top:-9999px;">
     <div id="scan-unknown-panel" style="display:none;margin-bottom:14px;"></div>
@@ -3129,6 +3134,83 @@ function loadScanFocus() {
     if (scanCaptureActive) setTimeout(() => input.focus(), 50);
   });
   input.focus();
+}
+
+// ---------- Camera-based scanning (phone use, no hardware scanner needed) ----------
+// Uses the browser's native BarcodeDetector (Shape Detection API) -- confirmed
+// available on Chrome for Android, not pulling in a third-party decoding
+// library for something the target browser already does natively. Not
+// supported on Safari/iOS as of this writing; fails with a clear message
+// rather than silently, since there's no reliable way to polyfill this
+// without a real fallback library.
+let scanCameraStream = null;
+let scanCameraDetectLoop = null;
+let scanCameraLastBarcode = null;
+let scanCameraLastBarcodeTime = 0;
+
+async function toggleCameraScan() {
+  const view = document.getElementById('scan-camera-view');
+  if (view && view.style.display === 'block') {
+    stopCameraScan();
+    return;
+  }
+  if (!('BarcodeDetector' in window)) {
+    alert("Camera scanning isn't supported on this browser. Try Chrome on Android, or use the hardware scanner.");
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  } catch (e) {
+    alert('Could not access the camera: ' + e.message);
+    return;
+  }
+  scanCameraStream = stream;
+  view.style.display = 'block';
+  const toggle = document.getElementById('scan-camera-toggle');
+  if (toggle) toggle.textContent = 'Stop Camera';
+  const video = document.getElementById('scan-camera-video');
+  video.srcObject = stream;
+
+  let detector;
+  try {
+    detector = new BarcodeDetector({ formats: ['upc_a', 'upc_e', 'ean_13', 'ean_8', 'code_128', 'code_39', 'itf', 'qr_code'] });
+  } catch (e) {
+    stopCameraScan();
+    alert("Camera scanning isn't supported on this browser. Try Chrome on Android, or use the hardware scanner.");
+    return;
+  }
+
+  scanCameraDetectLoop = setInterval(async () => {
+    if (video.readyState < 2) return;
+    let codes;
+    try {
+      codes = await detector.detect(video);
+    } catch (e) {
+      return; // transient per-frame detection errors are normal, ignore
+    }
+    if (!codes.length) return;
+    const value = codes[0].rawValue;
+    const now = Date.now();
+    // Debounce the SAME code re-firing every ~400ms while the camera holds
+    // steady on one barcode -- a fresh scan of the same item is still
+    // possible, just needs the camera moved away and back (or a few
+    // seconds' wait), matching how a real handheld scanner wouldn't fire
+    // continuously either while just sitting pointed at one label.
+    if (value === scanCameraLastBarcode && now - scanCameraLastBarcodeTime < 3000) return;
+    scanCameraLastBarcode = value;
+    scanCameraLastBarcodeTime = now;
+    handleScan(value);
+  }, 400);
+}
+
+function stopCameraScan() {
+  if (scanCameraDetectLoop) { clearInterval(scanCameraDetectLoop); scanCameraDetectLoop = null; }
+  if (scanCameraStream) { scanCameraStream.getTracks().forEach(t => t.stop()); scanCameraStream = null; }
+  const view = document.getElementById('scan-camera-view');
+  if (view) view.style.display = 'none';
+  const toggle = document.getElementById('scan-camera-toggle');
+  if (toggle) toggle.textContent = 'Scan with Camera';
 }
 
 function prependScanRow(id, barcode) {
@@ -3971,6 +4053,7 @@ function loadFullExpiry() {
 function openFocus(type) {
   document.getElementById('focus-overlay').classList.add('active');
   scanCaptureActive = false;
+  stopCameraScan();
   if (type==='cook') loadWhatCanIMake();
   else if (type==='stock') loadFullStock();
   else if (type==='shopping') loadFullShopping();
@@ -4156,7 +4239,7 @@ async function loadVoiceHistory() {
   }
 }
 
-function closeFocus() { document.getElementById('focus-overlay').classList.remove('active'); document.getElementById('osk').classList.remove('active'); oskTarget = null; scanCaptureActive = false; }
+function closeFocus() { document.getElementById('focus-overlay').classList.remove('active'); document.getElementById('osk').classList.remove('active'); oskTarget = null; scanCaptureActive = false; stopCameraScan(); }
 document.getElementById('focus-overlay').addEventListener('click', function(e) { if (e.target===this) closeFocus(); });
 let mediaRecorder = null;
 let audioChunks = [];
