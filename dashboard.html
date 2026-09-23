@@ -3146,7 +3146,16 @@ function setScanMode(mode) {
   loadScanFocus();
 }
 
+function scanDeepLinkUrl() {
+  return location.origin + location.pathname + '?focus=scan&mode=' + scanMode;
+}
+
 function loadScanFocus() {
+  // A QR to jump straight into this same view (with the current mode
+  // already selected) only makes sense on a screen big enough that it
+  // isn't the phone reading it -- on a phone this would just be a QR of
+  // the page you're already looking at, adding clutter for no reason.
+  const showPhoneQr = window.matchMedia('(min-width: 700px)').matches;
   document.getElementById('focus-inner').innerHTML = `
     <div class="focus-title">Scan Barcode</div>
     <div style="display:flex;gap:8px;margin-bottom:16px;">
@@ -3157,14 +3166,21 @@ function loadScanFocus() {
       Point the scanner at a barcode. Each scan ${scanMode==='consume'?'consumes':'adds'} one unit.
     </div>
     <button class="video-choose-btn" id="scan-camera-toggle" onclick="toggleCameraScan()" style="margin-bottom:12px;">Scan with Camera</button>
-    <div id="scan-camera-view" style="display:none;margin-bottom:14px;">
-      <video id="scan-camera-video" autoplay playsinline muted style="width:100%;max-height:38vh;object-fit:cover;border-radius:10px;background:#000;display:block;"></video>
-      <div style="font-size:11px;color:var(--muted);margin-top:6px;text-align:center;">Point the camera at a barcode</div>
-    </div>
+    ${showPhoneQr ? `
+    <div style="margin-bottom:14px;">
+      <button class="video-choose-btn" onclick="toggleScanQr()" id="scan-qr-toggle" style="margin-bottom:10px;">Continue on Phone</button>
+      <div id="scan-qr-panel" style="display:none;">
+        <div id="scan-qr" class="guest-qr-wrap"></div>
+        <button class="video-choose-btn" onclick="printScanQr(this)" style="margin:2px 0 8px;">Print QR Label</button>
+        <div class="wcim-hint">Scan this with your phone's camera to open this same Scan Barcode screen (${scanMode==='consume'?'Consuming':'Restocking'} mode) on your phone -- no need to retype the link.</div>
+      </div>
+    </div>` : ''}
     <input type="text" id="scan-capture-input" autocomplete="off" inputmode="none"
            style="position:absolute;left:-9999px;top:-9999px;">
     <div id="scan-unknown-panel" style="display:none;margin-bottom:14px;"></div>
     <div id="scan-feedback"></div>`;
+
+  if (showPhoneQr) renderGuestQr('scan-qr', scanDeepLinkUrl());
 
   const input = document.getElementById('scan-capture-input');
   input.addEventListener('keydown', e => {
@@ -3179,6 +3195,37 @@ function loadScanFocus() {
     if (scanCaptureActive) setTimeout(() => input.focus(), 50);
   });
   input.focus();
+}
+
+function toggleScanQr() {
+  const panel = document.getElementById('scan-qr-panel');
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+}
+
+async function printScanQr(btnEl) {
+  const original = btnEl.textContent;
+  btnEl.textContent = '...';
+  btnEl.disabled = true;
+  try {
+    const caption = 'Scan Barcode (' + (scanMode === 'consume' ? 'Consuming' : 'Restocking') + ')';
+    const res = await fetch('/label/print/qrcode', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ data: scanDeepLinkUrl(), caption, quantity: 1 })
+    });
+    const data = await res.json();
+    if (!data.job_id) {
+      btnEl.textContent = '✗';
+    } else {
+      const job = await pollPrintJob(data.job_id, (j) => {
+        btnEl.textContent = (j.phase === 'printing' && j.total) ? Math.round(j.current / j.total * 100) + '%' : '...';
+      });
+      btnEl.textContent = job.success ? '✓' : '✗';
+    }
+  } catch (e) {
+    btnEl.textContent = '✗';
+  }
+  setTimeout(() => { btnEl.textContent = original; btnEl.disabled = false; }, 2500);
 }
 
 // ---------- Camera-based scanning (phone use, no hardware scanner needed) ----------
@@ -4982,6 +5029,23 @@ async function dismissGuestRequest(id) {
 }
 
 if (GUEST_MODE) { renderGuestMode(); } else { renderVideoPanel(); }
+
+// Deep link for "Continue on Phone" (see loadScanFocus): a phone that
+// scans the QR shown there lands here with ?focus=scan[&mode=...], so it
+// jumps straight into the Scan Barcode view instead of the phone's user
+// having to retype the URL and re-tap the tile every time their browser
+// tab gets closed/backgrounded and killed.
+if (!GUEST_MODE) {
+  const deepLinkParams = new URLSearchParams(location.search);
+  if (deepLinkParams.get('focus') === 'scan') {
+    const deepMode = deepLinkParams.get('mode');
+    if (deepMode === 'consume' || deepMode === 'restock') {
+      scanMode = deepMode;
+      try { localStorage.setItem('kitchenhub-scan-mode', deepMode); } catch (e) {}
+    }
+    openFocus('scan');
+  }
+}
 
 // ---------- Draggable floating buttons (voice mic + timer bubble) ----------
 let dragJustHappened = false;
