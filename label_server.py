@@ -10,6 +10,7 @@ import traceback
 
 from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont
+import qrcode
 import requests
 import urllib3
 
@@ -250,6 +251,59 @@ def render_label(title, subtitle=None, extra_lines=None):
     return img
 
 
+def render_qr_label(data, caption=None):
+    """A QR code (optionally captioned) on the same physical canvas/margins/
+    registration-offset as render_label() -- HORIZONTAL_SHIFT corrects for a
+    print-head/label-edge misalignment that's physical, not text-specific, so
+    it applies here too. qrcode's own image is resized with NEAREST, not the
+    default antialiased resampling, since blurring a QR code's sharp
+    black/white module edges is exactly what makes it unreliable to scan.
+
+    A real printed test came back with the bottom of the content sitting
+    uncomfortably close to the label's physical edge, even though centering
+    it within LABEL_H theoretically left an equal 20px margin top and
+    bottom -- the same class of theoretical-vs-physical gap render_label()
+    already had to correct for with HEIGHT_FIT_SAFETY, just discovered here
+    via an actual print rather than assumed up front. Pin content to the top
+    margin and give the bottom noticeably more real clearance, rather than
+    splitting the difference evenly."""
+    img = Image.new("L", (LABEL_W, LABEL_H), 255)
+    draw = ImageDraw.Draw(img)
+
+    qr = qrcode.QRCode(border=2, error_correction=qrcode.constants.ERROR_CORRECT_M)
+    qr.add_data(data)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert("L")
+
+    MARGIN_TOP = MARGIN
+    MARGIN_BOTTOM = MARGIN + 30
+
+    cap_h = 0
+    cap_font = None
+    if caption:
+        cap_font = ImageFont.truetype(FONT_BOLD, 40)
+        cap_h = draw.textbbox((0, 0), caption, font=cap_font)[3] + 14
+
+    max_qr_h = LABEL_H - MARGIN_TOP - MARGIN_BOTTOM - cap_h
+    max_qr_w = LABEL_W - MARGIN * 2
+    qr_size = min(max_qr_h, max_qr_w)
+    qr_img = qr_img.resize((qr_size, qr_size), Image.NEAREST)
+
+    x = (LABEL_W - qr_size) // 2 + HORIZONTAL_SHIFT
+    y = MARGIN_TOP
+    if caption:
+        cap_bbox = draw.textbbox((0, 0), caption, font=cap_font)
+        cap_w = cap_bbox[2] - cap_bbox[0]
+        cx = (LABEL_W - cap_w) // 2 + HORIZONTAL_SHIFT
+        draw.text((cx - cap_bbox[0], y - cap_bbox[1]), caption, font=cap_font, fill=0)
+        y_qr = y + cap_h
+    else:
+        y_qr = y
+
+    img.paste(qr_img, (x, y_qr))
+    return img
+
+
 # --- Print jobs run against NiimPrintX's own asyncio API (rather than
 # shelling out to its CLI) on one persistent background event loop, so a
 # POST /print/* returns immediately with a job id and the dashboard can poll
@@ -380,6 +434,33 @@ def preview():
     img.save(buf, format='PNG')
     b64 = base64.b64encode(buf.getvalue()).decode('ascii')
     return jsonify(image=f"data:image/png;base64,{b64}")
+
+
+@app.route('/preview/qrcode', methods=['POST'])
+def preview_qrcode():
+    data = request.get_json(force=True, silent=True) or {}
+    payload = (data.get('data') or '').strip()
+    caption = (data.get('caption') or '').strip() or None
+    if not payload:
+        return jsonify(error="No data provided"), 400
+    img = render_qr_label(payload, caption=caption)
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    b64 = base64.b64encode(buf.getvalue()).decode('ascii')
+    return jsonify(image=f"data:image/png;base64,{b64}")
+
+
+@app.route('/print/qrcode', methods=['POST'])
+def print_qrcode():
+    data = request.get_json(force=True, silent=True) or {}
+    payload = (data.get('data') or '').strip()
+    caption = (data.get('caption') or '').strip() or None
+    quantity = max(1, min(10, int(data.get('quantity', 1))))
+    if not payload:
+        return jsonify(success=False, error="No data provided"), 400
+    img = render_qr_label(payload, caption=caption)
+    job_id = start_print_job(img, quantity)
+    return jsonify(job_id=job_id)
 
 
 @app.route('/print/text', methods=['POST'])
