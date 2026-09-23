@@ -3166,6 +3166,10 @@ function loadScanFocus() {
       Point the scanner at a barcode. Each scan ${scanMode==='consume'?'consumes':'adds'} one unit.
     </div>
     <button class="video-choose-btn" id="scan-camera-toggle" onclick="toggleCameraScan()" style="margin-bottom:12px;">Scan with Camera</button>
+    <div id="scan-camera-view" style="display:none;margin-bottom:14px;">
+      <video id="scan-camera-video" autoplay playsinline muted style="width:100%;max-height:38vh;object-fit:cover;border-radius:10px;background:#000;display:block;"></video>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px;text-align:center;">Point the camera at a barcode</div>
+    </div>
     ${showPhoneQr ? `
     <div style="margin-bottom:14px;">
       <button class="video-choose-btn" onclick="toggleScanQr()" id="scan-qr-toggle" style="margin-bottom:10px;">Continue on Phone</button>
@@ -5093,26 +5097,45 @@ document.addEventListener('touchstart', () => {
 //    but there's nothing left to scroll to, so no `scroll` event ever
 //    fires and dragJustHappened stays false.
 //
-// The fix that covers both: compare the touch's start position against
-// where it lifted (touchend's changedTouches), reusing the touchStartX/Y
-// globals the swipe-navigation handler above already tracks on every
-// touchstart (that touchstart listener always finishes running -- capture
-// and bubble phases both complete -- before this later touchend fires, so
-// no separate tracking is needed here). touchstart and touchend are never
-// subject to the compositor-thread skipping that affects touchmove -- only
-// the events in between can be dropped -- so measuring the two endpoints is
-// reliable no matter how the gesture was classified or whether anything
-// actually scrolled. The `scroll` listener stays too, as a cheap extra
-// safety net for momentum/fling scrolling that keeps going after touchend
-// already fired.
+// The fix that covers both: compare a touch's start position against
+// where it lifted (touchend's changedTouches). touchstart and touchend are
+// never subject to the compositor-thread skipping that affects touchmove --
+// only the events in between can be dropped -- so measuring the two
+// endpoints is reliable no matter how the gesture was classified or
+// whether anything actually scrolled.
+//
+// This tracks its OWN touch identifier in a private variable rather than
+// reusing the swipe-navigation handler's shared touchStartX/Y above --
+// on a real hand/phone (unlike a clean single-touch test), an incidental
+// second touch during a scroll (a palm brush, a thumb repositioning) fires
+// its own touchstart and overwrites those shared globals with a position
+// much closer to where the gesture was about to end, making the real
+// scroll look like a tiny movement and letting the click through anyway.
+// Tracking by identifier means only the specific touch being measured can
+// update or clear its own start position.
+let __dragTouchId = null, __dragTouchStartX = 0, __dragTouchStartY = 0;
+document.addEventListener('touchstart', (e) => {
+  if (__dragTouchId === null) {
+    const t = e.changedTouches[0];
+    __dragTouchId = t.identifier;
+    __dragTouchStartX = t.clientX;
+    __dragTouchStartY = t.clientY;
+  }
+}, { passive: true, capture: true });
 document.addEventListener('scroll', () => {
   dragJustHappened = true;
 }, { passive: true, capture: true });
 document.addEventListener('touchend', (e) => {
-  const t = e.changedTouches[0];
-  if (t && (Math.abs(t.clientX - touchStartX) > 10 || Math.abs(t.clientY - touchStartY) > 10)) {
-    dragJustHappened = true;
+  for (const t of e.changedTouches) {
+    if (t.identifier === __dragTouchId) {
+      if (Math.abs(t.clientX - __dragTouchStartX) > 10 || Math.abs(t.clientY - __dragTouchStartY) > 10) {
+        dragJustHappened = true;
+      }
+      __dragTouchId = null;
+    }
   }
+  // The `scroll` listener above stays too, as a cheap extra safety net for
+  // momentum/fling scrolling that keeps going after touchend already fired.
   if (dragJustHappened) setTimeout(() => { dragJustHappened = false; }, 300);
 }, { passive: true, capture: true });
 
