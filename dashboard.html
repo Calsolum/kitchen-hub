@@ -3147,7 +3147,51 @@ function updateScanRow(id, ok, text) {
   row.querySelector('.stock-name').textContent = text;
 }
 
+// Bulk-scanning support: if an "unknown barcode" panel is still sitting
+// unconfirmed when the NEXT scan comes in, auto-create it using whatever
+// name is currently showing (the online-lookup suggestion, or whatever was
+// typed) rather than making every single new item stop and wait for a tap.
+// Only fires the create when there's actually a name to use -- with nothing
+// suggested and nothing typed, there's nothing safe to auto-create, so that
+// one is just left aside for manual follow-up rather than blocking the scan
+// that interrupted it.
+async function autoCommitPendingUnknown() {
+  const panel = document.getElementById('scan-unknown-panel');
+  if (!panel || panel.style.display !== 'block' || !panel.dataset.currentBarcode) return;
+  const pendingBarcode = panel.dataset.currentBarcode;
+  const nameInput = document.getElementById('scan-new-name');
+  const name = nameInput ? nameInput.value.trim() : '';
+  const group = scanNewGroup;
+  delete panel.dataset.currentBarcode;
+  panel.style.display = 'none';
+  panel.innerHTML = '';
+  if (!name) return;
+
+  try {
+    const res = await fetch('/scan/register', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ barcode: pendingBarcode, new_product_name: name, product_group_id: group }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      const rowId = 'scan-row-' + Date.now() + '-auto';
+      prependScanRow(rowId, pendingBarcode);
+      updateScanRow(rowId, false, `Could not auto-create "${name}": ${data.error || 'unknown error'}`);
+      return;
+    }
+    // Fulfill the original scan's consume/restock intent now that it's
+    // registered -- that call produces its own feedback row showing the
+    // name and result, so the success path doesn't need a separate row here.
+    await handleScan(pendingBarcode);
+  } catch (e) {
+    const rowId = 'scan-row-' + Date.now() + '-auto';
+    prependScanRow(rowId, pendingBarcode);
+    updateScanRow(rowId, false, `Could not auto-create "${name}": network error`);
+  }
+}
+
 async function handleScan(barcode) {
+  await autoCommitPendingUnknown();
   const rowId = 'scan-row-' + Date.now();
   prependScanRow(rowId, barcode);
   try {
