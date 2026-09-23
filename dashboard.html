@@ -5007,23 +5007,27 @@ document.addEventListener('touchstart', () => {
 // clickable tile underneath, which still dispatches a click on some
 // devices/browsers even though the gesture was a scroll, not a tap --
 // reported as "tried to scroll, it opened a different screen instead."
-// Any real finger movement during a touch is treated the same as a drag.
-let touchTrackX = null, touchTrackY = null;
-document.addEventListener('touchstart', (e) => {
-  const t = e.touches[0];
-  touchTrackX = t.clientX;
-  touchTrackY = t.clientY;
-}, { passive: true, capture: true });
-document.addEventListener('touchmove', (e) => {
-  if (touchTrackX === null) return;
-  const t = e.touches[0];
-  if (Math.abs(t.clientX - touchTrackX) > 8 || Math.abs(t.clientY - touchTrackY) > 8) {
-    dragJustHappened = true;
-  }
+//
+// An earlier version of this tracked touchmove distance directly and did
+// NOT fix it in practice -- confirmed live by Tariq after deploying it.
+// Root cause: once Chrome recognizes a gesture as a scroll, it can hand
+// the rest of that gesture to the compositor thread and stop dispatching
+// further touchmove events to JS entirely (a real, deliberate performance
+// optimization, not a bug) -- so a fast or sustained scroll could show
+// almost no movement to a touchmove listener even though the container
+// visibly scrolled a long way, leaving dragJustHappened never set.
+//
+// Listening for the actual `scroll` event instead is reliable regardless
+// of which thread drove the scroll: it only fires once an element's
+// scrollTop/scrollLeft has genuinely changed. `scroll` doesn't bubble on
+// its own, but a CAPTURE-phase listener on document still receives it for
+// any nested scrollable descendant, since capture-phase dispatch happens
+// on the way down to the target regardless of whether the event bubbles
+// back up afterward.
+document.addEventListener('scroll', () => {
+  dragJustHappened = true;
 }, { passive: true, capture: true });
 document.addEventListener('touchend', () => {
-  touchTrackX = null;
-  touchTrackY = null;
   if (dragJustHappened) setTimeout(() => { dragJustHappened = false; }, 300);
 }, { passive: true, capture: true });
 
