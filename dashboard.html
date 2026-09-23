@@ -4429,6 +4429,13 @@ async function openVoice() {
 let touchStartX = 0, touchStartY = 0;
 document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; });
 document.addEventListener('touchend', e => {
+  // Only a global dashboard shortcut -- must not fire while a focus view
+  // (Scan Barcode, What Can I Make, etc.) is already open, otherwise
+  // scrolling inside that view can itself cross an 80px/60px threshold and
+  // silently swap the open view to Cook Tonight/Shopping/Stock underneath
+  // the user's finger. Found 2026-09-23 from a real report of "scrolling
+  // up in the Scan Barcode menu activates something."
+  if (document.getElementById('focus-overlay').classList.contains('active')) return;
   const dx = e.changedTouches[0].clientX - touchStartX;
   const dy = e.changedTouches[0].clientY - touchStartY;
   if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 60) { if (dx<0) openFocus('shopping'); else openFocus('stock'); }
@@ -5008,26 +5015,40 @@ document.addEventListener('touchstart', () => {
 // devices/browsers even though the gesture was a scroll, not a tap --
 // reported as "tried to scroll, it opened a different screen instead."
 //
-// An earlier version of this tracked touchmove distance directly and did
-// NOT fix it in practice -- confirmed live by Tariq after deploying it.
-// Root cause: once Chrome recognizes a gesture as a scroll, it can hand
-// the rest of that gesture to the compositor thread and stop dispatching
-// further touchmove events to JS entirely (a real, deliberate performance
-// optimization, not a bug) -- so a fast or sustained scroll could show
-// almost no movement to a touchmove listener even though the container
-// visibly scrolled a long way, leaving dragJustHappened never set.
+// Two earlier versions of this did NOT fully fix it in practice, both
+// confirmed live by Tariq:
+// 1. Tracking cumulative touchmove distance directly failed because once
+//    Chrome recognizes a gesture as a scroll, it can hand the rest of it to
+//    the compositor thread and stop dispatching further touchmove events to
+//    JS at all (a real, deliberate perf optimization) -- a fast/sustained
+//    scroll could show almost no movement to a touchmove listener.
+// 2. Listening for the `scroll` event instead fixed real scrolls, but missed
+//    drags that never actually change any scrollTop -- e.g. dragging up
+//    while already at the very top of a list (an overscroll/rubber-band
+//    gesture, hit on the Scan Barcode screen). The finger genuinely moves,
+//    but there's nothing left to scroll to, so no `scroll` event ever
+//    fires and dragJustHappened stays false.
 //
-// Listening for the actual `scroll` event instead is reliable regardless
-// of which thread drove the scroll: it only fires once an element's
-// scrollTop/scrollLeft has genuinely changed. `scroll` doesn't bubble on
-// its own, but a CAPTURE-phase listener on document still receives it for
-// any nested scrollable descendant, since capture-phase dispatch happens
-// on the way down to the target regardless of whether the event bubbles
-// back up afterward.
+// The fix that covers both: compare the touch's start position against
+// where it lifted (touchend's changedTouches), reusing the touchStartX/Y
+// globals the swipe-navigation handler above already tracks on every
+// touchstart (that touchstart listener always finishes running -- capture
+// and bubble phases both complete -- before this later touchend fires, so
+// no separate tracking is needed here). touchstart and touchend are never
+// subject to the compositor-thread skipping that affects touchmove -- only
+// the events in between can be dropped -- so measuring the two endpoints is
+// reliable no matter how the gesture was classified or whether anything
+// actually scrolled. The `scroll` listener stays too, as a cheap extra
+// safety net for momentum/fling scrolling that keeps going after touchend
+// already fired.
 document.addEventListener('scroll', () => {
   dragJustHappened = true;
 }, { passive: true, capture: true });
-document.addEventListener('touchend', () => {
+document.addEventListener('touchend', (e) => {
+  const t = e.changedTouches[0];
+  if (t && (Math.abs(t.clientX - touchStartX) > 10 || Math.abs(t.clientY - touchStartY) > 10)) {
+    dragJustHappened = true;
+  }
   if (dragJustHappened) setTimeout(() => { dragJustHappened = false; }, 300);
 }, { passive: true, capture: true });
 
