@@ -3176,6 +3176,7 @@ async function showUnknownBarcodePanel(barcode) {
   const products = await grocyGet('objects/products');
   const panel = document.getElementById('scan-unknown-panel');
   panel.style.display = 'block';
+  panel.dataset.currentBarcode = barcode;
   scanNewGroup = null;
   panel.innerHTML = `
     <div style="border:1px solid var(--border);border-radius:12px;padding:12px;">
@@ -3184,7 +3185,7 @@ async function showUnknownBarcodePanel(barcode) {
              style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;padding:6px 8px;margin-bottom:8px;box-sizing:border-box;">
       <div id="scan-link-results" style="max-height:120px;overflow-y:auto;margin-bottom:10px;"></div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">...or create a new product:</div>
-      <input type="text" id="scan-new-name" placeholder="New product name"
+      <input type="text" id="scan-new-name" placeholder="Looking up online..."
              style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;padding:6px 8px;margin-bottom:6px;box-sizing:border-box;">
       <div style="display:flex;gap:6px;margin-bottom:8px;">
         <button class="video-tab" onclick="scanNewGroup=${CONSUMABLES_GROUP_ID}">Household</button>
@@ -3203,6 +3204,27 @@ async function showUnknownBarcodePanel(barcode) {
       `<div onclick="submitExistingLink('${barcode}', ${p.id})" style="padding:6px 8px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--border);">${p.name}</div>`
     ).join('');
   });
+
+  // Best-effort name suggestion from a free public barcode database, so the
+  // common case is "confirm/tweak" instead of typing from scratch. Guarded
+  // by panel.dataset.currentBarcode in case a second scan replaces this
+  // panel (a different unknown barcode) before this lookup resolves -- a
+  // stale response should never overwrite whatever's showing by then.
+  try {
+    const res = await fetch('/scan/lookup_external/' + encodeURIComponent(barcode));
+    const data = await res.json();
+    if (panel.dataset.currentBarcode !== barcode) return;
+    const input = document.getElementById('scan-new-name');
+    if (!input) return;
+    input.placeholder = 'New product name';
+    if (data.success && data.found && data.name && !input.value) {
+      input.value = data.name;
+    }
+  } catch (e) {
+    if (panel.dataset.currentBarcode !== barcode) return;
+    const input = document.getElementById('scan-new-name');
+    if (input) input.placeholder = 'New product name';
+  }
 }
 
 async function submitExistingLink(barcode, productId) {

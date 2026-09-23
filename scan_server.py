@@ -43,6 +43,62 @@ def lookup(barcode):
         return jsonify(success=False, error=str(e)), 502
 
 
+@app.route("/lookup_external/<barcode>")
+def lookup_external(barcode):
+    """Best-effort product-name suggestion from free public barcode databases,
+    for the unknown-barcode registration flow -- confirmed live against this
+    household's own real, already-registered barcodes (exact match on a
+    Subway sauce, a Knorr pasta side, etc.) before relying on it in the UI.
+    Never raises: a failed/empty lookup here should just leave the "New
+    product name" field blank for the user to type themselves, not break
+    the scan flow."""
+    barcode = barcode.strip()
+
+    # Open Food Facts' API rejects requests with a generic/default User-Agent
+    # (403, non-JSON body) -- confirmed live: curl worked, Python's requests
+    # with no headers didn't. Their usage policy requires a descriptive UA
+    # identifying the app, not just any string.
+    OFF_HEADERS = {"User-Agent": "KitchenHub/1.0 (personal home dashboard; not for redistribution)"}
+
+    try:
+        r = requests.get(
+            f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json",
+            params={"fields": "product_name,product_name_en,brands"},
+            headers=OFF_HEADERS,
+            timeout=6,
+        )
+        data = r.json()
+        if data.get("status") == 1:
+            product = data.get("product") or {}
+            name = product.get("product_name_en") or product.get("product_name")
+            brand = product.get("brands")
+            if name:
+                name = name.strip()
+                if brand and brand.strip().lower() not in name.lower():
+                    name = f"{brand.strip()} {name}"
+                return jsonify(success=True, found=True, name=name, source="openfoodfacts")
+    except requests.RequestException:
+        pass
+
+    # Fall back to UPCitemdb's free trial endpoint -- broader general-retail
+    # coverage (alcohol, household goods) than the food-focused Open Food
+    # Facts, but rate-limited (100 lookups/day, no key), so it's the second
+    # try, not the first.
+    try:
+        r = requests.get(
+            "https://api.upcitemdb.com/prod/trial/lookup",
+            params={"upc": barcode}, timeout=6,
+        )
+        data = r.json()
+        items = data.get("items") or []
+        if items and items[0].get("title"):
+            return jsonify(success=True, found=True, name=items[0]["title"].strip(), source="upcitemdb")
+    except requests.RequestException:
+        pass
+
+    return jsonify(success=True, found=False)
+
+
 @app.route("/action", methods=["POST"])
 def scan_action():
     data = request.get_json(force=True, silent=True) or {}
