@@ -42,6 +42,7 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 #bg-grid { position: fixed; inset: 0; background-image: linear-gradient(rgba(200,245,96,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(200,245,96,0.025) 1px, transparent 1px); background-size: 48px 48px; z-index: 1; pointer-events: none; }
 .app { position: relative; z-index: 2; width: 100vw; height: 100vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
 .card { background: var(--surface); backdrop-filter: blur(18px); border: 1px solid var(--border); border-radius: 18px; padding: 18px 20px; position: relative; overflow: hidden; cursor: pointer; transition: border-color 0.3s; }
+.schedule-card { grid-column: span 2; }
 .card:hover { border-color: var(--border-hover); }
 .card-label { font-size: 9px; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
 .card-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
@@ -89,11 +90,9 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
   .alert-chip { flex: none; width: calc(50% - 3px); font-size: 9px; padding: 5px 8px; }
   .voice-btn { bottom: 16px; right: 16px; width: 50px; height: 50px; font-size: 18px; }
   .ticker { display: none; }
-  .action-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
-  .action-btn { padding: 8px; }
-  .action-icon { font-size: 14px; margin-bottom: 2px; width: 20px; height: 20px; }
-  .action-label { font-size: 9px; }
-  .action-sub { font-size: 8px; }
+  /* .action-grid/.action-btn/etc. are no longer overridden per breakpoint here --
+     see the unified auto-fit rule below, which adapts to any width without a
+     hardcoded cutoff. */
   .stock-item { font-size: 11px; padding: 4px 0; }
   .shop-item { font-size: 11px; padding: 4px 0; }
 }
@@ -101,6 +100,18 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
   .main-grid { grid-template-columns: 1fr; }
   .weather-block { display: none; }
   .topbar { gap: 8px; }
+  /* .schedule-card's own base rule (below) spans 2 columns, which is exactly
+     right at the 2-column @media (max-width:700px) tier, but at THIS
+     narrower tier .main-grid is down to a single explicit column -- a
+     child still asking to span 2 forces the grid to silently create an
+     extra IMPLICIT column to satisfy it, which is what was actually
+     causing the whole home screen to render as two cramped, uneven
+     columns on a real phone instead of one clean stacked column, even
+     though matchMedia() correctly reported the narrow breakpoint as
+     active. Confirmed via getComputedStyle() showing two column tracks
+     where only one was expected, then found the exact card via grep,
+     not guessed. */
+  .schedule-card { grid-column: span 1; }
 }
 .stock-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; gap: 8px; }
 .stock-item:last-child { border-bottom: none; }
@@ -129,7 +140,15 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 .cal-bar-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
 .cal-bar-fill { height: 100%; border-radius: 3px; transition: width 1s ease; }
 .cal-ok { background: var(--accent); } .cal-warn { background: var(--accent3); } .cal-over { background: var(--accent4); }
-.action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+/* Column count adapts to whatever width is actually available (auto-fit +
+   minmax) instead of a hardcoded breakpoint -- a fixed cutoff (e.g.
+   "@media min-width:701px = 4 columns") already broke once for a device
+   that landed right at the edge of that guess (a wide phone/unfolded
+   foldable got the desktop 4-column treatment and rendered as clipped,
+   label-less icon squares). This is width-agnostic: 2 columns on a narrow
+   phone, more on a wider screen, 4 on the ~620px kiosk card, all from one
+   rule, with no per-device guessing to get wrong again. */
+.action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
 /* This card's fixed height (matched to its siblings in the same main-grid row, per the
    established row-height-matching CSS Grid behavior documented elsewhere in this file) no
    longer fits all Quick Actions tiles now that there are 10 of them -- the card was
@@ -137,26 +156,11 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
    to reach it. Scroll within the card instead of resizing it, so this row's shared height
    with Stock Status / Shopping List is untouched. */
 .quick-actions-card { overflow-y: auto; }
-.action-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; cursor: pointer; transition: all 0.3s; text-align: left; display: flex; flex-direction: column; justify-content: center; }
+.action-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; cursor: pointer; transition: all 0.3s; text-align: left; display: flex; flex-direction: column; justify-content: center; }
 .action-btn:hover { border-color: var(--accent); transform: translateY(-2px); }
-.action-icon { font-size: 14px; margin-bottom: 2px; width: 20px; height: 20px; }
-.action-label { font-size: 10px; color: var(--text); line-height: 1.2; }
-.action-sub { font-size: 8px; color: var(--muted); margin-top: 0; }
-/* The roomier 4-column layout is desktop/kiosk-only (min-width matches the existing
-   @media (max-width: 700px) mobile block above it in this file, so the two ranges
-   never overlap). An earlier version of these rules was unconditional and placed
-   AFTER that mobile block in source order -- CSS resolves equal-specificity rules
-   by source order regardless of which one sits inside a media query, so it was
-   silently winning on phones too, forcing 4 cramped columns and larger padding/
-   fonts instead of the phone's own already-working smaller 2-column layout.
-   Confirmed via a real phone screenshot, not assumed from reading the CSS alone. */
-@media (min-width: 701px) {
-  .action-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .action-btn { padding: 12px 10px; }
-  .action-icon { font-size: 16px; margin-bottom: 4px; width: 22px; height: 22px; }
-  .action-label { font-size: 12px; line-height: 1.25; }
-  .action-sub { font-size: 9px; margin-top: 3px; }
-}
+.action-icon { font-size: 15px; margin-bottom: 3px; width: 21px; height: 21px; }
+.action-label { font-size: 11px; color: var(--text); line-height: 1.2; }
+.action-sub { font-size: 8px; color: var(--muted); margin-top: 1px; }
 .video-card { display: flex; flex-direction: column; }
 .video-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
 .video-tab { font-size: 9px; padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s; }
@@ -459,7 +463,7 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
       </div>
       <div class="video-panel-body" id="video-panel-body"></div>
     </div>
-    <div class="card" onclick="openFocus('calendar')" style="grid-column: span 2;">
+    <div class="card schedule-card" onclick="openFocus('calendar')">
       <div class="card-label">Today's Schedule</div>
       <div id="calendar-list"><div class="loading">Loading calendar...</div></div>
     </div>
@@ -4960,6 +4964,32 @@ document.addEventListener('click', (e) => {
     dragJustHappened = false;
   }
 }, true);
+
+// Reuses the exact suppression above for a different cause: scrolling a
+// container (e.g. the Quick Actions card, or the focus panel, both
+// overflow-y:auto) by touch can end with the finger lifting over a
+// clickable tile underneath, which still dispatches a click on some
+// devices/browsers even though the gesture was a scroll, not a tap --
+// reported as "tried to scroll, it opened a different screen instead."
+// Any real finger movement during a touch is treated the same as a drag.
+let touchTrackX = null, touchTrackY = null;
+document.addEventListener('touchstart', (e) => {
+  const t = e.touches[0];
+  touchTrackX = t.clientX;
+  touchTrackY = t.clientY;
+}, { passive: true, capture: true });
+document.addEventListener('touchmove', (e) => {
+  if (touchTrackX === null) return;
+  const t = e.touches[0];
+  if (Math.abs(t.clientX - touchTrackX) > 8 || Math.abs(t.clientY - touchTrackY) > 8) {
+    dragJustHappened = true;
+  }
+}, { passive: true, capture: true });
+document.addEventListener('touchend', () => {
+  touchTrackX = null;
+  touchTrackY = null;
+  if (dragJustHappened) setTimeout(() => { dragJustHappened = false; }, 300);
+}, { passive: true, capture: true });
 
 function makeDraggable(el, storageKey) {
   if (!el) return;
