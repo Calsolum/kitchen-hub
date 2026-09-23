@@ -129,7 +129,7 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 .cal-bar-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
 .cal-bar-fill { height: 100%; border-radius: 3px; transition: width 1s ease; }
 .cal-ok { background: var(--accent); } .cal-warn { background: var(--accent3); } .cal-over { background: var(--accent4); }
-.action-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 /* This card's fixed height (matched to its siblings in the same main-grid row, per the
    established row-height-matching CSS Grid behavior documented elsewhere in this file) no
    longer fits all Quick Actions tiles now that there are 10 of them -- the card was
@@ -137,11 +137,26 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
    to reach it. Scroll within the card instead of resizing it, so this row's shared height
    with Stock Status / Shopping List is untouched. */
 .quick-actions-card { overflow-y: auto; }
-.action-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 10px; cursor: pointer; transition: all 0.3s; text-align: left; display: flex; flex-direction: column; justify-content: center; }
+.action-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; cursor: pointer; transition: all 0.3s; text-align: left; display: flex; flex-direction: column; justify-content: center; }
 .action-btn:hover { border-color: var(--accent); transform: translateY(-2px); }
-.action-icon { font-size: 16px; margin-bottom: 4px; width: 22px; height: 22px; }
-.action-label { font-size: 12px; color: var(--text); line-height: 1.25; }
-.action-sub { font-size: 9px; color: var(--muted); margin-top: 3px; }
+.action-icon { font-size: 14px; margin-bottom: 2px; width: 20px; height: 20px; }
+.action-label { font-size: 10px; color: var(--text); line-height: 1.2; }
+.action-sub { font-size: 8px; color: var(--muted); margin-top: 0; }
+/* The roomier 4-column layout is desktop/kiosk-only (min-width matches the existing
+   @media (max-width: 700px) mobile block above it in this file, so the two ranges
+   never overlap). An earlier version of these rules was unconditional and placed
+   AFTER that mobile block in source order -- CSS resolves equal-specificity rules
+   by source order regardless of which one sits inside a media query, so it was
+   silently winning on phones too, forcing 4 cramped columns and larger padding/
+   fonts instead of the phone's own already-working smaller 2-column layout.
+   Confirmed via a real phone screenshot, not assumed from reading the CSS alone. */
+@media (min-width: 701px) {
+  .action-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .action-btn { padding: 12px 10px; }
+  .action-icon { font-size: 16px; margin-bottom: 4px; width: 22px; height: 22px; }
+  .action-label { font-size: 12px; line-height: 1.25; }
+  .action-sub { font-size: 9px; margin-top: 3px; }
+}
 .video-card { display: flex; flex-direction: column; }
 .video-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
 .video-tab { font-size: 9px; padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s; }
@@ -3113,7 +3128,7 @@ function loadScanFocus() {
     </div>
     <button class="video-choose-btn" id="scan-camera-toggle" onclick="toggleCameraScan()" style="margin-bottom:12px;">Scan with Camera</button>
     <div id="scan-camera-view" style="display:none;margin-bottom:14px;">
-      <video id="scan-camera-video" autoplay playsinline muted style="width:100%;border-radius:10px;background:#000;display:block;"></video>
+      <video id="scan-camera-video" autoplay playsinline muted style="width:100%;max-height:38vh;object-fit:cover;border-radius:10px;background:#000;display:block;"></video>
       <div style="font-size:11px;color:var(--muted);margin-top:6px;text-align:center;">Point the camera at a barcode</div>
     </div>
     <input type="text" id="scan-capture-input" autocomplete="off" inputmode="none"
