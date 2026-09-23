@@ -43,7 +43,6 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 .app { position: relative; z-index: 2; width: 100vw; height: 100vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
 .card { background: var(--surface); backdrop-filter: blur(18px); border: 1px solid var(--border); border-radius: 18px; padding: 18px 20px; position: relative; overflow: hidden; cursor: pointer; transition: border-color 0.3s; }
 .schedule-card { grid-column: span 2; }
-.card:hover { border-color: var(--border-hover); }
 .card-label { font-size: 9px; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
 .card-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 .topbar { display: flex; align-items: center; justify-content: space-between; background: var(--surface); backdrop-filter: blur(18px); border: 1px solid var(--border); border-radius: 18px; padding: 12px 22px; flex-shrink: 0; position: relative; overflow: hidden; }
@@ -64,7 +63,6 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 .ctrl-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface2); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; transition: all 0.3s; color: var(--text); }
 .char-icon { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; -webkit-user-drag: none; user-select: none; pointer-events: none; }
 .char-icon-sq { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; display: block; -webkit-user-drag: none; user-select: none; }
-.ctrl-btn:hover { border-color: var(--accent); transform: scale(1.1); }
 .icon { width: 1em; height: 1em; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
 .icon-fill { stroke: none; fill: currentColor; }
 .icon-inline { width: 1em; height: 1em; vertical-align: -0.15em; margin-right: 6px; flex-shrink: 0; }
@@ -113,6 +111,39 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
      not guessed. */
   .schedule-card { grid-column: span 1; }
 }
+/* All :hover styling lives here, gated to devices that can actually hover with a
+   precise pointer (a real mouse/trackpad). On a touchscreen -- this kiosk, and every
+   phone this dashboard gets used from -- there is no true hover: the browser applies
+   :hover on touchstart and then has no clean signal for when to remove it again,
+   so it can visibly stick on whatever was last touched (a lit-up border, a lifted
+   card) until some other element is tapped. Reported live: "I was scrolling and
+   [a tile] ended up looking like this... tapping elsewhere fixes it" -- exactly the
+   stuck-hover-after-touch signature, not a bug in the touch-scroll-suppression fix
+   added earlier the same day. Scoping these rules out entirely for touch devices
+   is the standard fix, rather than trying to force-clear the pseudo-class by hand.
+
+   The CSS (hover: hover) media feature alone isn't enough here, though: confirmed
+   live that THIS kiosk's own touchscreen (desktop Linux Chromium, no mouse attached)
+   still reports hover:hover as true -- a real device/OS mismatch, not a device this
+   query was designed to get wrong, but it means the kiosk would stay just as exposed
+   to this exact bug as the media query alone would suggest it isn't. The html.is-touch
+   class (set by the very first real touchstart anywhere on the page, see the script
+   near the end of this file) is the actual backstop -- it reflects genuine touch usage
+   directly instead of trusting the browser's own capability report, and once added,
+   it's never removed for the rest of that page's lifetime (a session either is or
+   isn't touch-driven in practice; it doesn't switch mid-use). Both layers are kept:
+   the media query still correctly excludes real desktop/mouse users on its own, and
+   html.is-touch additionally excludes any device -- kiosk included -- where a real
+   touch was actually observed regardless of what the media feature claims. */
+@media (hover: hover) and (pointer: fine) {
+  html:not(.is-touch) .card:hover { border-color: var(--border-hover); }
+  html:not(.is-touch) .ctrl-btn:hover { border-color: var(--accent); transform: scale(1.1); }
+  html:not(.is-touch) .action-btn:hover { border-color: var(--accent); transform: translateY(-2px); }
+  html:not(.is-touch) .music-btn:hover { border-color: var(--accent); color: var(--accent); }
+  html:not(.is-touch) .voice-btn:hover { box-shadow: 0 6px 28px rgba(200,245,96,0.45); }
+  html:not(.is-touch) .timer-fab:hover { box-shadow: 0 6px 28px rgba(96,213,245,0.5); }
+  html:not(.is-touch) .recipe-result:hover { border-color: var(--accent); }
+}
 .stock-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; gap: 8px; }
 .stock-item:last-child { border-bottom: none; }
 .stock-name { color: var(--text); flex: 1; }
@@ -157,7 +188,6 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
    with Stock Status / Shopping List is untouched. */
 .quick-actions-card { overflow-y: auto; }
 .action-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; cursor: pointer; transition: all 0.3s; text-align: left; display: flex; flex-direction: column; justify-content: center; }
-.action-btn:hover { border-color: var(--accent); transform: translateY(-2px); }
 .action-icon { font-size: 15px; margin-bottom: 3px; width: 21px; height: 21px; }
 .action-label { font-size: 11px; color: var(--text); line-height: 1.2; }
 .action-sub { font-size: 8px; color: var(--muted); margin-top: 1px; }
@@ -195,7 +225,6 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 .music-artist { font-size: 10px; color: var(--muted); margin-top: 2px; }
 .music-controls { display: flex; gap: 6px; }
 .music-btn { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 10px; transition: all 0.2s; }
-.music-btn:hover { border-color: var(--accent); color: var(--accent); }
 .bottom-bar { display: flex; gap: 10px; flex-shrink: 0; }
 .alert-chip { display: flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 30px; font-size: 11px; border: 1px solid; backdrop-filter: blur(18px); flex: 1; justify-content: center; }
 .a-red { background: rgba(245,96,96,0.08); border-color: rgba(245,96,96,0.25); color: var(--accent4); }
@@ -232,11 +261,9 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 .ticker-item b { color: var(--text); font-weight: 500; }
 @keyframes scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
 .voice-btn { position: fixed; bottom: 80px; right: 24px; width: 56px; height: 56px; border-radius: 50%; background: var(--accent); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 22px; box-shadow: 0 4px 24px rgba(200,245,96,0.3); z-index: 100; transition: box-shadow 0.3s; touch-action: none; user-select: none; }
-.voice-btn:hover { box-shadow: 0 6px 28px rgba(200,245,96,0.45); }
 .voice-btn.dragging { transition: none; box-shadow: 0 8px 32px rgba(200,245,96,0.6); }
 .timer-fab { position: fixed; bottom: 80px; left: 24px; width: 56px; height: 56px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent2); cursor: pointer; display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 100; box-shadow: 0 4px 24px rgba(96,213,245,0.35); transition: box-shadow 0.3s; touch-action: none; user-select: none; }
 .timer-fab.show { display: flex; }
-.timer-fab:hover { box-shadow: 0 6px 28px rgba(96,213,245,0.5); }
 .timer-fab.dragging { transition: none; box-shadow: 0 8px 32px rgba(96,213,245,0.7); }
 .timer-fab.done { border-color: var(--accent4); background: rgba(245,96,96,0.18); box-shadow: 0 4px 24px rgba(245,96,96,0.5); animation: timerFlash 0.6s infinite; }
 .timer-fab-time { font-family: 'DM Serif Display', serif; font-size: 14px; color: var(--accent2); line-height: 1; font-variant-numeric: tabular-nums; }
@@ -255,7 +282,6 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 .focus-close { position: absolute; top: 16px; right: 16px; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface2); color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; }
 .focus-title { font-family: 'DM Serif Display', serif; font-size: 28px; margin-bottom: 20px; color: var(--text); }
 .recipe-result { background: var(--surface2); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 10px; cursor: pointer; transition: border-color 0.2s; }
-.recipe-result:hover { border-color: var(--accent); }
 .recipe-name { font-family: 'DM Serif Display', serif; font-size: 20px; color: var(--text); margin-bottom: 6px; }
 .recipe-meta { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 .recipe-tag { font-size: 10px; padding: 2px 9px; border-radius: 20px; background: rgba(200,245,96,0.1); color: var(--accent); border: 1px solid rgba(200,245,96,0.2); }
@@ -4964,6 +4990,16 @@ document.addEventListener('click', (e) => {
     dragJustHappened = false;
   }
 }, true);
+
+// Marks real touch usage directly rather than trusting the CSS (hover: hover)
+// media feature, which this kiosk's own touchscreen (desktop Linux Chromium,
+// no mouse) confirms it can misreport as true -- see the .is-touch selectors
+// in the hover-rules block near the top of this file's <style> for the full
+// reasoning. Once a real touchstart happens, treat the rest of this page's
+// lifetime as touch-driven; a session doesn't switch input methods mid-use.
+document.addEventListener('touchstart', () => {
+  document.documentElement.classList.add('is-touch');
+}, { passive: true, capture: true });
 
 // Reuses the exact suppression above for a different cause: scrolling a
 // container (e.g. the Quick Actions card, or the focus panel, both
