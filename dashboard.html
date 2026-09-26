@@ -4477,43 +4477,16 @@ async function openVoice() {
   }
 }
 
-let touchStartX = 0, touchStartY = 0;
-document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; });
-// A Touch's own `target` is fixed to whatever element the touch started on
-// and does NOT update as the finger moves elsewhere on screen (unlike mouse
-// events) -- so this reliably answers "did this gesture begin inside a
-// scrollable card" regardless of where the finger ended up.
-function __startedInsideScrollableCard(el) {
-  while (el && el !== document.body) {
-    if (el.scrollHeight > el.clientHeight + 1) {
-      const oy = getComputedStyle(el).overflowY;
-      if (oy === 'auto' || oy === 'scroll') return true;
-    }
-    el = el.parentElement;
-  }
-  return false;
-}
-document.addEventListener('touchend', e => {
-  // Only a global dashboard shortcut -- must not fire while a focus view
-  // (Scan Barcode, What Can I Make, etc.) is already open, otherwise
-  // scrolling inside that view can itself cross an 80px/60px threshold and
-  // silently swap the open view to Cook Tonight/Shopping/Stock underneath
-  // the user's finger. Found 2026-09-23 from a real report of "scrolling
-  // up in the Scan Barcode menu activates something."
-  if (document.getElementById('focus-overlay').classList.contains('active')) return;
-  // Found 2026-09-26: the guard above wasn't enough -- this shortcut also
-  // fired from a scroll INSIDE the Quick Actions card on the plain
-  // dashboard (no focus view open at all), because a mostly-vertical
-  // real-finger scroll had enough horizontal drift to cross the 60px dx
-  // threshold and get misread as a left/right swipe, silently opening
-  // Stock. A page-level swipe shortcut must never steal a drag that began
-  // inside a card that owns its own scrolling.
-  if (__startedInsideScrollableCard(e.changedTouches[0].target)) return;
-  const dx = e.changedTouches[0].clientX - touchStartX;
-  const dy = e.changedTouches[0].clientY - touchStartY;
-  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 60) { if (dx<0) openFocus('shopping'); else openFocus('stock'); }
-  if (dy < -80 && Math.abs(dy) > Math.abs(dx)) openFocus('cook');
-});
+// The global swipe-to-navigate shortcut that used to live here (swipe
+// anywhere on the dashboard = jump to Shopping/Stock/Cook Tonight) was
+// removed 2026-09-26. It fired from a raw distance/angle check on any
+// touchend, with no concept of "started near an icon" -- so reaching
+// across the screen to tap something, or scrolling a card with any
+// diagonal drift, could silently swap the whole screen out from under a
+// normal touch. Traced to this exact mechanism three separate times
+// (see the dated notes further down this file for the investigation
+// trail) before removing it outright; Quick Actions already gives direct
+// access to the same destinations.
 
 const photos = [
   'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=1920&q=80',
@@ -5126,14 +5099,14 @@ document.addEventListener('touchstart', () => {
 // endpoints is reliable no matter how the gesture was classified or
 // whether anything actually scrolled.
 //
-// This tracks its OWN touch identifier in a private variable rather than
-// reusing the swipe-navigation handler's shared touchStartX/Y above --
-// on a real hand/phone (unlike a clean single-touch test), an incidental
-// second touch during a scroll (a palm brush, a thumb repositioning) fires
-// its own touchstart and overwrites those shared globals with a position
-// much closer to where the gesture was about to end, making the real
-// scroll look like a tiny movement and letting the click through anyway.
-// Tracking by identifier means only the specific touch being measured can
+// This tracks its OWN touch identifier in a private variable rather than a
+// single shared start-position pair -- on a real hand/phone (unlike a clean
+// single-touch test), an incidental second touch during a scroll (a palm
+// brush, a thumb repositioning) fires its own touchstart, and a shared
+// variable would get overwritten with a position much closer to where the
+// gesture was about to end, making the real scroll look like a tiny
+// movement and letting the click through anyway. Tracking by identifier
+// means only the specific touch being measured can
 // update or clear its own start position.
 let __dragTouchId = null, __dragTouchStartX = 0, __dragTouchStartY = 0;
 document.addEventListener('touchstart', (e) => {
