@@ -5139,6 +5139,65 @@ document.addEventListener('touchend', (e) => {
   if (dragJustHappened) setTimeout(() => { dragJustHappened = false; }, 300);
 }, { passive: true, capture: true });
 
+// ---------- Temporary diagnostic: on-screen touch/click trace ----------
+// Added 2026-09-26 because three separate fixes for "lifting my finger
+// after a drag still registers a tap" each passed synthetic/CDP testing
+// but still failed on a real phone. Rather than guess a fourth mechanism,
+// this logs every touchstart/touchmove/touchcancel/touchend/click as it
+// really happens on the real device, visibly on-screen, so the actual
+// event sequence can be read directly instead of inferred. Enable with
+// ?touchdebug=1 on the URL. Safe to leave deployed -- completely inert
+// unless that param is present. Remove once the real cause is found.
+if (new URLSearchParams(location.search).get('touchdebug') === '1') {
+  const dbgBox = document.createElement('div');
+  dbgBox.id = 'touch-debug-box';
+  dbgBox.style.cssText = 'position:fixed;left:4px;right:4px;bottom:4px;max-height:45vh;overflow-y:auto;background:rgba(0,0,0,0.88);color:#0f0;font:10px/1.35 monospace;padding:6px;z-index:99999;white-space:pre-wrap;border-radius:6px;pointer-events:none;';
+  document.body.appendChild(dbgBox);
+  const dbgLines = [];
+  const t0 = Date.now();
+  function dbgLog(line) {
+    dbgLines.push('+' + (Date.now() - t0).toString().padStart(6, ' ') + 'ms  ' + line);
+    if (dbgLines.length > 60) dbgLines.shift();
+    dbgBox.textContent = dbgLines.join('\n');
+    dbgBox.scrollTop = dbgBox.scrollHeight;
+  }
+  function dbgTarget(e) {
+    const el = e.target;
+    if (!el || !el.tagName) return String(el);
+    return el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (el.className && typeof el.className === 'string' ? '.' + el.className.split(' ').slice(0,2).join('.') : '');
+  }
+  document.addEventListener('touchstart', (e) => {
+    const t = e.changedTouches[0];
+    dbgLog(`touchstart  id=${t.identifier} (${t.clientX},${t.clientY})  target=${dbgTarget(e)}  touches=${e.touches.length}`);
+  }, { passive: true, capture: true });
+  let dbgMoveCount = 0;
+  document.addEventListener('touchmove', (e) => {
+    dbgMoveCount++;
+    if (dbgMoveCount % 5 === 1) {
+      const t = e.changedTouches[0];
+      dbgLog(`touchmove#${dbgMoveCount}  id=${t.identifier} (${t.clientX},${t.clientY})`);
+    }
+  }, { passive: true, capture: true });
+  document.addEventListener('touchcancel', (e) => {
+    const t = e.changedTouches[0];
+    dbgLog(`touchCANCEL  id=${t.identifier} (${t.clientX},${t.clientY})  <-- browser took this touch away from JS`);
+  }, { passive: true, capture: true });
+  document.addEventListener('touchend', (e) => {
+    dbgMoveCount = 0;
+    const t = e.changedTouches[0];
+    dbgLog(`touchend    id=${t.identifier} (${t.clientX},${t.clientY})  dragJustHappened(after)=${dragJustHappened}`);
+  }, { passive: true, capture: true });
+  // Registered after the real suppressor above (same node, same phase, so
+  // listeners run in registration order) -- by the time this runs,
+  // defaultPrevented already reflects whether the suppressor swallowed it.
+  document.addEventListener('click', (e) => {
+    dbgLog(`CLICK  target=${dbgTarget(e)}  defaultPrevented=${e.defaultPrevented}`);
+  }, true);
+  document.addEventListener('scroll', (e) => {
+    dbgLog(`scroll  target=${dbgTarget(e)}  scrollTop=${e.target.scrollTop !== undefined ? e.target.scrollTop : '?'}`);
+  }, { passive: true, capture: true });
+}
+
 function makeDraggable(el, storageKey) {
   if (!el) return;
   let startX, startY, origLeft, origTop, dragging = false, moved = false;
