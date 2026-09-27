@@ -2859,7 +2859,7 @@ const GUEST_MODE = new URLSearchParams(location.search).has('guest');
 // here to fix it at the source instead of relying on that timing accident.
 let sleepMode = false;
 let lastActivityTime = Date.now();
-const INACTIVITY_SLEEP_MS = 10 * 60 * 1000; // 10 minutes idle
+const INACTIVITY_SLEEP_MS = 30 * 60 * 1000; // 30 minutes idle -- bumped from 10 on 2026-09-27
 const TEMP_SLEEP_THRESHOLD = 65; // deg C -- lowered 2026-08-31 after the Official Active Cooler was installed and confirmed working (idle ~46C, stress-tested peak ~56.5C under sustained full load); the old 80C threshold was tuned to the pre-cooler 76-79C baseline and stopped being a meaningful safety net once idle dropped ~30C
 
 let consumablesAddOpen = false;
@@ -5301,12 +5301,17 @@ function checkInactivity() {
   if (sleepMode) return;
   if (Date.now() - lastActivityTime > INACTIVITY_SLEEP_MS) enterSleep('inactivity');
 }
-// Inactivity trigger disabled 2026-09-01 -- diagnostic step to rule it out as a cause of the
-// intermittent WiFi disconnects, even though enterSleep() itself only touches the DOM (display:none
-// + a CSS overlay) and has no code path that could plausibly reach the network stack. Temperature
-// and manual sleep triggers are untouched. Re-enable by restoring this line if disconnects persist
-// with inactivity sleep off, which would confirm it's unrelated.
-// setInterval(checkInactivity, 30000);
+// Re-enabled 2026-09-27: was disabled 2026-09-01 as a diagnostic step to rule this out as a
+// cause of intermittent WiFi disconnects (even though enterSleep() itself only touches the DOM
+// and has no code path that could plausibly reach the network stack). That investigation found
+// and fixed the real cause -- the WiFi driver's power-save default -- confirmed unrelated to
+// this. Real hardware display power-off (wlopm/swayidle, DPMS on the HDMI output) was tried
+// instead for reducing 24/7 screen wear, but the touchscreen's own touch controller loses power
+// along with the display and can't wake it by touch -- a hardware limitation of this monitor,
+// not fixable here. This DOM-level blackout doesn't save backlight power, but does stop
+// rendering a static bright image for hours and stops background polling, with touch-to-wake
+// already working via the overlay's own onclick.
+setInterval(checkInactivity, 30000);
 
 async function checkTempForSleep() {
   if (sleepMode) return;
