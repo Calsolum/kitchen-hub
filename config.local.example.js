@@ -10,4 +10,7 @@ window.KITCHEN_CONFIG = {
   MEALIE_TOKEN: "",
   // https://openweathermap.org/api
   WEATHER_KEY: "",
+  // The YouTube playlist the dashboard's YouTube tab plays: the "list=" value from a playlist URL.
+  // Kept here, not in dashboard.html, so an unlisted playlist's id never lands in the public repo.
+  YOUTUBE_PLAYLIST_ID: "",
 };

@@ -4744,38 +4744,30 @@ loadTimersFromStorage();
 renderTimerChip();
 setInterval(tickTimers, 1000);
 
-// ---------- Live View panel (YouTube embed / Security placeholders) ----------
+// ---------- Live View panel (YouTube playlist embed / Security cameras) ----------
 let videoTab = 'youtube';
+// The YouTube tab plays this playlist. The id lives in config.local.js (gitignored) rather than here,
+// because it's an *unlisted* playlist and this file is mirrored to a public repo. To point it somewhere
+// else, change YOUTUBE_PLAYLIST_ID there -- there is deliberately no in-app picker.
+const YOUTUBE_PLAYLIST_ID = window.KITCHEN_CONFIG?.YOUTUBE_PLAYLIST_ID || "";
+// A single video chosen by voice search (dormant until a microphone exists) temporarily replaces the
+// playlist. Not persisted: a reload always goes back to the playlist.
 let youtubeVideoId = null;
-try { youtubeVideoId = localStorage.getItem('kitchenhub-video-id') || null; } catch(e) {}
-
-function extractYouTubeId(url) {
-  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([a-zA-Z0-9_-]{11})/);
-  return m ? m[1] : null;
-}
-
-function chooseYouTubeVideo() {
-  const url = prompt('Paste a YouTube video URL:', '');
-  if (!url) return;
-  const id = extractYouTubeId(url);
-  if (!id) { alert('Could not find a YouTube video in that URL.'); return; }
-  youtubeVideoId = id;
-  try { localStorage.setItem('kitchenhub-video-id', id); } catch(e) {}
-  renderVideoPanel();
-}
+// Set when an overheating sleep blanked the Live View, so wakeUp() knows to bring it back.
+let liveViewStoppedForHeat = false;
+// The old paste-a-link picker saved its choice here; drop it so a stale one can't linger.
+try { localStorage.removeItem('kitchenhub-video-id'); } catch(e) {}
 
 function clearYouTubeVideo() {
   youtubeVideoId = null;
-  try { localStorage.removeItem('kitchenhub-video-id'); } catch(e) {}
   renderVideoPanel();
 }
 
 // Called when the whisper server's response to a spoken command includes
 // action: "play_youtube" -- voice search resolved server-side, this just
-// points the existing Live View panel at the result, same as picking manually.
+// points the existing Live View panel at the result.
 function playYoutubeFromVoice(videoId) {
   youtubeVideoId = videoId;
-  try { localStorage.setItem('kitchenhub-video-id', videoId); } catch(e) {}
   videoTab = 'youtube';
   const yt = document.getElementById('video-tab-youtube');
   const sec = document.getElementById('video-tab-security');
@@ -4785,6 +4777,9 @@ function playYoutubeFromVoice(videoId) {
 }
 
 function switchVideoTab(tab) {
+  // Re-rendering the YouTube tab reloads the iframe and restarts the playlist, so tapping the tab
+  // you're already on (or the top-bar button) must not rebuild it.
+  if (tab === videoTab && document.getElementById('video-panel-body')?.childElementCount) return;
   videoTab = tab;
   const yt = document.getElementById('video-tab-youtube');
   const sec = document.getElementById('video-tab-security');
@@ -4795,6 +4790,12 @@ function switchVideoTab(tab) {
 
 function openSecurity() {
   switchVideoTab('security');
+  const card = document.getElementById('video-panel-body');
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function openYouTube() {
+  switchVideoTab('youtube');
   const card = document.getElementById('video-panel-body');
   if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
@@ -4840,11 +4841,17 @@ function renderVideoPanel() {
   const body = document.getElementById('video-panel-body');
   if (!body) return;
   if (videoTab === 'youtube') {
-    if (youtubeVideoId) {
-      body.innerHTML = `<iframe src="https://www.youtube.com/embed/${youtubeVideoId}" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe><div class="video-change-btn" onclick="clearYouTubeVideo()">Change</div>`;
-    } else {
-      body.innerHTML = '<div class="video-idle-text">No video selected</div><div class="video-choose-btn" onclick="chooseYouTubeVideo()">Choose YouTube Video</div>';
+    // No autoplay param on purpose: Chromium blocks unmuted autoplay on a fresh page load, and a muted
+    // music playlist is pointless -- tap YouTube's play button. loop=1 repeats the whole playlist.
+    if (!youtubeVideoId && !YOUTUBE_PLAYLIST_ID) {
+      body.innerHTML = '<div class="video-idle-text">No playlist set<br>(add YOUTUBE_PLAYLIST_ID to config.local.js)</div>';
+      return;
     }
+    const src = youtubeVideoId
+      ? `https://www.youtube.com/embed/${youtubeVideoId}?rel=0&playsinline=1`
+      : `https://www.youtube.com/embed/videoseries?list=${YOUTUBE_PLAYLIST_ID}&loop=1&rel=0&playsinline=1`;
+    body.innerHTML = `<iframe src="${src}" title="YouTube video player" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`
+      + (youtubeVideoId ? '<div class="video-change-btn" onclick="clearYouTubeVideo()">Playlist</div>' : '');
   } else {
     body.innerHTML = `<div class="security-grid">${SECURITY_CAMERAS.map(securityTileHTML).join('')}</div>`;
   }
@@ -5210,6 +5217,12 @@ function enterSleep(reason) {
   const reasonText = { manual: 'manual', inactivity: 'idle', temperature: 'high temperature' }[reason] || reason || '';
   document.getElementById('sleep-reason').textContent = reasonText ? ('zzz — ' + reasonText) : '';
   document.getElementById('sleep-overlay').classList.add('active');
+  // Idle and manual sleep leave the Live View alone, so a playing playlist keeps going as background
+  // music behind the black overlay. Only an overheating sleep stops it (and the camera streams).
+  if (typeof reason === 'string' && reason.startsWith('temperature')) {
+    const body = document.getElementById('video-panel-body');
+    if (body) { body.innerHTML = ''; liveViewStoppedForHeat = true; }
+  }
   updateSleepClock();
 }
 
@@ -5218,6 +5231,7 @@ function wakeUp() {
   sleepMode = false;
   document.querySelector('.app').style.display = '';
   document.getElementById('sleep-overlay').classList.remove('active');
+  if (liveViewStoppedForHeat) { liveViewStoppedForHeat = false; renderVideoPanel(); }
   markActivity();
   refreshAll();
 }
