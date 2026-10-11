@@ -5211,6 +5211,10 @@ document.addEventListener('pointerdown', markActivity, true);
 function enterSleep(reason) {
   if (sleepMode) return;
   sleepMode = true;
+  // A fullscreen YouTube player stays the document's fullscreen element even after .app is hidden, and
+  // while any element is fullscreen the rest of the page -- including the "tap to wake" overlay below --
+  // can't receive taps. Leave fullscreen first or the screen can never be woken (found 2026-10-11).
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   document.querySelector('.app').style.display = 'none';
   document.getElementById('iframe-overlay').style.display = 'none';
   document.getElementById('focus-overlay').classList.remove('active');
