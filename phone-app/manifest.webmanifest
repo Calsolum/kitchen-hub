@@ -1,0 +1,16 @@
+{
+  "name": "Kitchen Hub",
+  "short_name": "Kitchen",
+  "description": "Shopping list and pantry for the Kitchen Hub",
+  "start_url": "/dashboard/m/",
+  "scope": "/dashboard/m/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#14201b",
+  "theme_color": "#14201b",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

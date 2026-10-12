@@ -3806,7 +3806,7 @@ async function loadShopping() {
     }
     document.getElementById('shopping-list').innerHTML = list.slice(0,8).map(item => {
       const product = productMap[item.product_id] || {};
-      return `<div class="shop-item" onclick="this.classList.toggle('checked')"><div class="shop-check"></div><span class="shop-name">${product.name||'Unknown'}</span><span class="shop-qty">x${Math.round(item.amount)}</span></div>`;
+      return `<div class="shop-item${item.done ? ' checked' : ''}" onclick="this.classList.toggle('checked')"><div class="shop-check"></div><span class="shop-name">${String(product.name||item.note||'Unknown').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span><span class="shop-qty">x${Math.round(item.amount)}</span></div>`;
     }).join('');
   } catch(e) {
     document.getElementById('shopping-list').innerHTML = '<div class="loading">Could not load shopping list</div>';
@@ -4259,7 +4259,7 @@ async function loadFullShopping() {
       ${list.length===0?'<div style="font-size:12px;color:var(--muted);">Shopping list is empty</div>':
       list.map(item => {
         const product = productMap[item.product_id]||{};
-        return `<div class="shop-item" onclick="this.classList.toggle('checked')"><div class="shop-check"></div><span class="shop-name">${product.name||'Unknown'}</span><span class="shop-qty">x${Math.round(item.amount)}</span></div>`;
+        return `<div class="shop-item${item.done ? ' checked' : ''}" onclick="this.classList.toggle('checked')"><div class="shop-check"></div><span class="shop-name">${String(product.name||item.note||'Unknown').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span><span class="shop-qty">x${Math.round(item.amount)}</span></div>`;
       }).join('')}`;
   } catch(e) {
     document.getElementById('focus-inner').innerHTML = '<div class="focus-title">Shopping</div><div class="loading">Could not load</div>';

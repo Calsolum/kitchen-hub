@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14201b">
+<title>Kitchen Hub</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<!-- config.local.js is gitignored and lives only on the Pi; it defines window.KITCHEN_CONFIG.GROCY_KEY -->
+<script src="../config.local.js" onerror="void 0"></script>
+<style>
+:root{--bg:#f4f7f5;--card:#fff;--ink:#14201b;--sub:#566860;--line:#dce5e0;--acc:#1b7a55;--accbg:#dff1e8;--warn:#85560a;--warnbg:#fcefd0;--bad:#a02a2a;--badbg:#fbe3e3;--top:#14201b;--topink:#e9f1ec}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1613;--card:#17221d;--ink:#e9f1ec;--sub:#9db0a7;--line:#263530;--acc:#5cc996;--accbg:#173a2a;--warn:#f0c36a;--warnbg:#3a2e12;--bad:#f09a9a;--badbg:#3d1c1c;--top:#0a110e}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+.app{min-height:100dvh;display:flex;flex-direction:column}
+header{position:sticky;top:0;z-index:5;background:var(--top);color:var(--topink);padding:calc(10px + env(safe-area-inset-top)) 16px 10px;display:flex;align-items:center;gap:10px}
+header h1{font-size:18px;font-weight:600;margin:0;flex:1}
+.pill{font-size:13px;padding:4px 10px;border-radius:999px;background:var(--accbg);color:var(--acc)}
+.pill.offline,.pill.error{background:var(--warnbg);color:var(--warn)}
+.pill.syncing{background:var(--line);color:var(--sub)}
+.iconbtn{min-height:44px;min-width:44px;border:1px solid #3a4a43;background:transparent;color:var(--topink);border-radius:10px;padding:0 12px}
+.panes{flex:1;display:grid;grid-template-columns:minmax(0,1fr);gap:16px;padding:12px 16px calc(84px + env(safe-area-inset-bottom))}
+.pane{display:none}
+body[data-tab="list"] #paneList,body[data-tab="pantry"] #panePantry{display:block}
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+.tabbar button{flex:1;min-height:56px;border:0;background:none;font-size:15px;color:var(--sub)}
+body[data-tab="list"] #tabList,body[data-tab="pantry"] #tabPantry{color:var(--acc);font-weight:600;box-shadow:inset 0 3px 0 var(--acc)}
+@media (min-width:600px){
+  .panes{grid-template-columns:minmax(0,1fr) minmax(0,1fr);padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+  .pane{display:block!important}
+  .tabbar{display:none}
+}
+h2{font-size:17px;margin:4px 0 8px;display:flex;justify-content:space-between;align-items:baseline}
+h2 small{font-size:14px;color:var(--sub);font-weight:400}
+h3{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);margin:16px 0 6px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;width:100%;min-height:58px;padding:8px 14px;border:0;border-bottom:1px solid var(--line);background:none;text-align:left}
+.row:last-child{border-bottom:0}
+.chk{flex:none;width:28px;height:28px;border-radius:8px;border:2px solid var(--sub);display:grid;place-items:center;font-size:18px;line-height:1;color:transparent}
+.row.on .chk{background:var(--acc);border-color:var(--acc);color:var(--card)}
+.row.on .name{text-decoration:line-through;color:var(--sub)}
+.body{flex:1;min-width:0}
+.name{font-size:17px;overflow-wrap:anywhere}
+.sub{font-size:14px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub.deal{color:var(--sub)}
+.sub.wrap{white-space:normal}
+.qty{flex:none;font-size:15px;color:var(--sub)}
+.tag{flex:none;font-size:13px;padding:3px 9px;border-radius:999px;background:var(--line);color:var(--sub)}
+.tag.warn{background:var(--warnbg);color:var(--warn)}
+.tag.bad{background:var(--badbg);color:var(--bad)}
+.tag.good{background:var(--accbg);color:var(--acc)}
+.addbtn{flex:none;min-height:44px;min-width:64px;border-radius:10px;border:1px solid var(--acc);background:none;color:var(--acc);font-size:15px;padding:0 12px}
+.empty{color:var(--sub);padding:16px 4px}
+input[type=search]{width:100%;min-height:48px;border-radius:12px;border:1px solid var(--line);background:var(--card);padding:0 14px;font-size:17px;margin:4px 0 8px}
+input[type=search]:focus{outline:2px solid var(--acc);outline-offset:1px}
+.donebar{position:sticky;bottom:calc(68px + env(safe-area-inset-bottom));margin-top:14px}
+@media (min-width:600px){.donebar{bottom:12px}}
+.primary{width:100%;min-height:52px;border-radius:12px;border:0;background:var(--acc);color:var(--card);font-size:17px;font-weight:600}
+.sheet{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center}
+.sheet[hidden]{display:none}
+.sheet-card{width:100%;max-width:520px;max-height:85dvh;overflow:auto;background:var(--card);border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
+@media (min-width:600px){.sheet{align-items:center}.sheet-card{border-radius:18px}}
+.sheet-card h2{font-size:19px;margin:0 0 10px}
+.sheet-card ul{margin:0 0 12px;padding-left:20px}
+.sheet-card li{margin:3px 0}
+.actions{display:flex;gap:40px;margin-top:16px}
+.actions button{flex:1;min-height:52px;border-radius:12px;font-size:17px;border:1px solid var(--line);background:none}
+.actions .go{background:var(--acc);border-color:var(--acc);color:var(--card);font-weight:600}
+#toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:30;max-width:90vw;background:var(--top);color:var(--topink);padding:10px 16px;border-radius:12px;font-size:15px}
+#toast[hidden]{display:none}
+@media (min-width:600px){#toast{bottom:24px}}
+</style>
+</head>
+<body data-tab="list">
+<div class="app">
+  <header>
+    <h1>Kitchen Hub</h1>
+    <span id="status" class="pill syncing" role="status">Connecting…</span>
+    <button class="iconbtn" id="refreshBtn" type="button" aria-label="Refresh">Sync</button>
+  </header>
+
+  <main class="panes">
+    <section class="pane" id="paneList" aria-label="Shopping list">
+      <h2>Shopping list <small id="listCount"></small></h2>
+      <input type="search" id="addInput" placeholder="Add an item" autocomplete="off" enterkeyhint="done" aria-label="Add an item">
+      <div id="addResults"></div>
+      <div id="listRows"></div>
+      <div class="donebar" id="doneBar" hidden><button class="primary" id="doneBtn" type="button"></button></div>
+    </section>
+
+    <section class="pane" id="panePantry" aria-label="Pantry">
+      <h2>Pantry <small id="pantryCount"></small></h2>
+      <input type="search" id="pantryInput" placeholder="Do I have…" autocomplete="off" aria-label="Search the pantry">
+      <div id="pantryRows"></div>
+    </section>
+  </main>
+
+  <nav class="tabbar" aria-label="Sections">
+    <button type="button" id="tabList">List</button>
+    <button type="button" id="tabPantry">Pantry</button>
+  </nav>
+</div>
+
+<div class="sheet" id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="sheet-card" id="sheetCard"></div>
+</div>
+<div id="toast" role="status" hidden></div>
+
+<script>
+(() => {
+'use strict';
+let KEY = window.KITCHEN_CONFIG && window.KITCHEN_CONFIG.GROCY_KEY;
+const LIST_ID = 1;
+const K_CACHE = 'kitchenhub-m-cache', K_QUEUE = 'kitchenhub-m-queue', K_ADDED = 'kitchenhub-m-added', K_FLIPP = 'kitchenhub-m-flipp', K_TAB = 'kitchenhub-m-tab';
+const FLIPP_TTL = 6 * 3600e3;
+const $ = id => document.getElementById(id);
+
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+};
+
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
+async function api(method, path, body) {
+  const res = await fetch('/api/' + path, {
+    method,
+    headers: Object.assign({ 'GROCY-API-KEY': KEY || '' }, body ? { 'Content-Type': 'application/json' } : {}),
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!res.ok) { const e = new Error('Grocy ' + res.status); e.status = res.status; throw e; }
+  return res.status === 204 ? null : res.json();
+}
+const isNetworkError = e => !e.status;
+// config.local.js isn't available when the app opens with no signal, so keep the last good key on this phone.
+if (KEY) LS.set('kitchenhub-m-key', KEY); else KEY = LS.get('kitchenhub-m-key', '');
+
+const S = { list: [], products: {}, stock: {}, locations: {}, syncedAt: null, online: null };
+let queue = LS.get(K_QUEUE, {});
+let addedPending = LS.get(K_ADDED, []);
+let flipp = LS.get(K_FLIPP, {});
+let refreshing = false;
+
+/* ---------- dates / formatting ---------- */
+const today0 = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
+const parseDay = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const daysUntil = s => Math.round((parseDay(s) - today0()) / 864e5);
+const fmtDay = s => parseDay(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+const fmtQty = n => Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
+const fmtTime = ts => new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+const cmpName = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+
+/* ---------- state ---------- */
+function buildStock(rows) {
+  const out = {};
+  for (const r of rows) {
+    const a = parseFloat(r.amount) || 0;
+    if (a <= 0) continue;
+    const s = out[r.product_id] || (out[r.product_id] = { amount: 0, best: null, locs: [] });
+    s.amount += a;
+    const bb = r.best_before_date;
+    if (bb && bb < '2999' && (!s.best || bb < s.best)) s.best = bb;
+    if (r.location_id && !s.locs.includes(r.location_id)) s.locs.push(r.location_id);
+  }
+  return out;
+}
+
+function ingest(raw) {
+  S.products = {};
+  raw.products.forEach(p => { if (p.active !== 0) S.products[p.id] = p; });
+  S.locations = {};
+  raw.locs.forEach(l => { S.locations[l.id] = l.name; });
+  S.stock = buildStock(raw.stockRows);
+  S.list = raw.list.map(r => Object.assign({}, r));
+  for (const r of S.list) if (queue[r.id] !== undefined) r.done = queue[r.id];
+}
+
+const visibleRows = () => S.list.filter(r => !addedPending.includes(r.id));
+const rowName = r => r.product_id ? ((S.products[r.product_id] || {}).name || 'Unknown product') : (r.note || 'Untitled note');
+const onList = pid => visibleRows().some(r => r.product_id === pid && !r.done);
+
+/* ---------- status / toast ---------- */
+function setStatus(kind, text) {
+  const el = $('status');
+  el.className = 'pill ' + kind;
+  const waiting = Object.keys(queue).length;
+  if (text) el.textContent = text;
+  else if (kind === 'ok') el.textContent = 'Connected';
+  else if (kind === 'syncing') el.textContent = 'Syncing…';
+  else if (kind === 'offline') {
+    el.textContent = 'Offline' + (S.syncedAt ? ' · synced ' + fmtTime(S.syncedAt) : '') + (waiting ? ' · ' + waiting + ' waiting' : '');
+  }
+}
+let toastTimer;
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 3000);
+}
+
+/* ---------- loading ---------- */
+async function flushQueue() {
+  for (const [id, v] of Object.entries(queue)) {
+    try { await api('PUT', 'objects/shopping_list/' + id, { done: v }); delete queue[id]; }
+    catch (e) { if (isNetworkError(e)) throw e; delete queue[id]; }
+  }
+  LS.set(K_QUEUE, queue);
+}
+
+async function settleAdded() {
+  for (const id of addedPending.slice()) {
+    try { await api('DELETE', 'objects/shopping_list/' + id); }
+    catch (e) { if (isNetworkError(e)) throw e; }
+    addedPending = addedPending.filter(x => x !== id);
+    LS.set(K_ADDED, addedPending);
+  }
+}
+
+function loadCache() {
+  const c = LS.get(K_CACHE, null);
+  if (!c) return false;
+  ingest(c); S.syncedAt = c.ts;
+  return true;
+}
+
+async function refresh() {
+  if (refreshing) return;
+  refreshing = true; setStatus('syncing');
+  let ok = false;
+  try {
+    if (!KEY) { const e = new Error('no key'); if (navigator.onLine) e.status = 401; throw e; }
+    await flushQueue(); await settleAdded();
+    const [list, products, stockRows, locs] = await Promise.all([
+      api('GET', 'objects/shopping_list'), api('GET', 'objects/products'),
+      api('GET', 'objects/stock'), api('GET', 'objects/locations')
+    ]);
+    const raw = { list, products, stockRows, locs, ts: Date.now() };
+    ingest(raw); LS.set(K_CACHE, raw);
+    S.online = true; S.syncedAt = raw.ts; ok = true;
+    setStatus('ok');
+  } catch (e) {
+    loadCache();
+    if (isNetworkError(e)) { S.online = false; setStatus('offline'); }
+    else {
+      S.online = false;
+      setStatus('error', e.status === 401 || e.status === 403 ? 'Grocy key not accepted' : 'Hub error ' + e.status);
+    }
+  } finally { refreshing = false; }
+  renderAll();
+  if (ok) loadFlipp();
+}
+
+async function refetchList() {
+  try {
+    S.list = (await api('GET', 'objects/shopping_list')).map(r => Object.assign({}, r));
+    for (const r of S.list) if (queue[r.id] !== undefined) r.done = queue[r.id];
+    const c = LS.get(K_CACHE, null); if (c) { c.list = S.list; LS.set(K_CACHE, c); }
+  } catch (e) { /* the next full refresh will catch up */ }
+  renderAll();
+}
+
+/* ---------- flyer deals ---------- */
+function bestDeal(name, items) {
+  const words = name.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3).map(w => w.endsWith('s') ? w.slice(0, -1) : w);
+  if (!words.length) return null;
+  const now = Date.now();
+  const hits = items.filter(it => it.price != null && (!it.valid_to || Date.parse(it.valid_to) > now) &&
+    words.every(w => (it.name || '').toLowerCase().includes(w)));
+  hits.sort((a, b) => a.price - b.price);
+  return hits[0] ? { price: hits[0].price, store: hits[0].merchant, item: hits[0].name } : null;
+}
+
+async function loadFlipp() {
+  const names = [...new Set(visibleRows().filter(r => !r.done && S.products[r.product_id]).map(r => S.products[r.product_id].name))];
+  const todo = names.filter(n => !(flipp[n] && Date.now() - flipp[n].ts < FLIPP_TTL));
+  let i = 0;
+  const worker = async () => {
+    while (i < todo.length) {
+      const n = todo[i++];
+      try {
+        const res = await fetch('/calendar/flipp?q=' + encodeURIComponent(n));
+        if (!res.ok) continue;
+        const d = await res.json();
+        flipp[n] = { ts: Date.now(), deal: bestDeal(n, d.items || []) };
+        LS.set(K_FLIPP, flipp); renderList();
+      } catch (e) { return; }
+    }
+  };
+  await Promise.all([worker(), worker()]);
+}
+
+/* ---------- list ---------- */
+function listRow(r) {
+  const pid = r.product_id;
+  const subs = [];
+  if (pid) {
+    const st = S.stock[pid];
+    const deal = (flipp[rowName(r)] || {}).deal;
+    if (!r.done && deal) subs.push(h('div', { class: 'sub deal' }, 'Flyer: $' + deal.price.toFixed(2) + ' · ' + deal.item + ' · ' + deal.store));
+    subs.push(h('div', { class: 'sub' }, (st ? fmtQty(st.amount) : 'None') + ' at home' + (r.note ? ' · ' + r.note : '')));
+  } else subs.push(h('div', { class: 'sub' }, 'Note'));
+  return h('button', {
+    type: 'button', class: 'row' + (r.done ? ' on' : ''), role: 'checkbox', 'aria-checked': r.done ? 'true' : 'false',
+    onclick: () => toggle(r)
+  },
+  h('span', { class: 'chk', 'aria-hidden': 'true' }, '✓'),
+  h('span', { class: 'body' }, h('div', { class: 'name' }, rowName(r)), subs),
+  pid ? h('span', { class: 'qty' }, '×' + fmtQty(Number(r.amount))) : null);
+}
+
+function renderList() {
+  const host = $('listRows'); host.replaceChildren();
+  const rows = visibleRows().sort((a, b) => cmpName(rowName(a), rowName(b)));
+  const todo = rows.filter(r => !r.done), done = rows.filter(r => r.done);
+  if (!rows.length) host.append(h('p', { class: 'empty' }, S.syncedAt ? 'Your shopping list is empty. Add something above.' : "Can't reach the hub yet. Check that Tailscale is on."));
+  if (todo.length) host.append(h('div', { class: 'card' }, todo.map(listRow)));
+  if (done.length) { host.append(h('h3', {}, 'In basket')); host.append(h('div', { class: 'card' }, done.map(listRow))); }
+  $('listCount').textContent = todo.length ? todo.length + ' to buy' : '';
+  const bar = $('doneBar');
+  bar.hidden = !done.length;
+  $('doneBtn').textContent = 'Done shopping (' + done.length + ')';
+}
+
+async function toggle(r) {
+  const nv = r.done ? 0 : 1;
+  r.done = nv; renderList();
+  const c = LS.get(K_CACHE, null); if (c) { const cr = c.list.find(x => x.id === r.id); if (cr) cr.done = nv; LS.set(K_CACHE, c); }
+  try { await api('PUT', 'objects/shopping_list/' + r.id, { done: nv }); delete queue[r.id]; LS.set(K_QUEUE, queue); }
+  catch (e) {
+    if (isNetworkError(e)) { queue[r.id] = nv; LS.set(K_QUEUE, queue); S.online = false; setStatus('offline'); }
+    else { r.done = nv ? 0 : 1; renderList(); toast("Couldn't update that item. Try again."); }
+  }
+}
+
+/* ---------- adding ---------- */
+async function addProduct(pid) {
+  if (onList(pid)) { toast('Already on your list'); return; }
+  try {
+    await api('POST', 'stock/shoppinglist/add-product', { product_id: pid, list_id: LIST_ID, product_amount: 1 });
+    toast('Added ' + S.products[pid].name);
+    await refetchList();
+  } catch (e) { toast(isNetworkError(e) ? 'Adding needs a connection' : "Couldn't add that. Try again."); }
+}
+
+async function addNote(text) {
+  try {
+    await api('POST', 'objects/shopping_list', { shopping_list_id: LIST_ID, note: text, amount: 1 });
+    toast('Added “' + text + '”');
+    $('addInput').value = ''; renderAddResults();
+    await refetchList();
+  } catch (e) { toast(isNetworkError(e) ? 'Adding needs a connection' : "Couldn't add that. Try again."); }
+}
+
+function matches(q) {
+  q = q.toLowerCase();
+  return Object.values(S.products).filter(p => p.name.toLowerCase().includes(q))
+    .sort((a, b) => (a.name.toLowerCase().startsWith(q) ? 0 : 1) - (b.name.toLowerCase().startsWith(q) ? 0 : 1) || cmpName(a.name, b.name)).slice(0, 6);
+}
+
+function renderAddResults() {
+  const host = $('addResults'); host.replaceChildren();
+  const q = $('addInput').value.trim();
+  if (!q) return;
+  const found = matches(q);
+  const rows = found.map(p => {
+    const st = S.stock[p.id];
+    return h('button', { type: 'button', class: 'row', onclick: async () => { await addProduct(p.id); $('addInput').value = ''; renderAddResults(); } },
+      h('span', { class: 'body' }, h('div', { class: 'name' }, p.name), h('div', { class: 'sub' }, (st ? fmtQty(st.amount) : 'None') + ' at home')),
+      onList(p.id) ? h('span', { class: 'tag good' }, 'On list') : h('span', { class: 'tag' }, 'Add'));
+  });
+  rows.push(h('button', { type: 'button', class: 'row', onclick: () => addNote(q) },
+    h('span', { class: 'body' }, h('div', { class: 'name' }, 'Add “' + q + '” as a note'), h('div', { class: 'sub' }, 'Not in your pantry products'))));
+  host.append(h('div', { class: 'card', style: 'margin-bottom:12px' }, rows));
+}
+
+/* ---------- done shopping ---------- */
+function openSheet(children) {
+  const card = $('sheetCard'); card.replaceChildren(...children);
+  $('sheet').hidden = false;
+}
+const closeSheet = () => { $('sheet').hidden = true; };
+
+function askDone() {
+  const done = visibleRows().filter(r => r.done);
+  if (!done.length) return;
+  const prods = done.filter(r => r.product_id), notes = done.filter(r => !r.product_id);
+  const kids = [h('h2', { id: 'sheetTitle' }, 'Done shopping?')];
+  if (prods.length) kids.push(h('p', {}, 'These go into your pantry stock:'), h('ul', {}, prods.map(r => h('li', {}, rowName(r) + ' ×' + fmtQty(Number(r.amount))))));
+  if (notes.length) kids.push(h('p', {}, 'Notes are just removed from the list:'), h('ul', {}, notes.map(r => h('li', {}, rowName(r)))));
+  kids.push(h('div', { class: 'actions' },
+    h('button', { type: 'button', onclick: closeSheet }, 'Cancel'),
+    h('button', { type: 'button', class: 'go', id: 'goBtn', onclick: finishShopping }, 'Add to pantry')));
+  openSheet(kids);
+}
+
+async function finishShopping() {
+  const btn = $('goBtn'); if (btn.dataset.busy) return;
+  btn.dataset.busy = '1'; btn.textContent = 'Adding…';
+  const done = visibleRows().filter(r => r.done);
+  const problems = []; let ok = 0, stopped = false;
+  for (const r of done) {
+    try {
+      if (r.product_id) {
+        const p = S.products[r.product_id];
+        if (!p || (r.qu_id && p.qu_id_stock && r.qu_id !== p.qu_id_stock)) { problems.push(rowName(r) + ' (different unit; add it by hand in Grocy)'); continue; }
+        await api('POST', 'stock/products/' + r.product_id + '/add', { amount: Number(r.amount), transaction_type: 'purchase' });
+        addedPending.push(r.id); LS.set(K_ADDED, addedPending);
+      }
+      try { await api('DELETE', 'objects/shopping_list/' + r.id); addedPending = addedPending.filter(x => x !== r.id); LS.set(K_ADDED, addedPending); }
+      catch (e) { if (!isNetworkError(e)) { addedPending = addedPending.filter(x => x !== r.id); LS.set(K_ADDED, addedPending); } }
+      ok++;
+    } catch (e) {
+      problems.push(rowName(r) + (isNetworkError(e) ? ' (lost connection)' : ' (Grocy refused it)'));
+      if (isNetworkError(e)) { stopped = true; break; }
+    }
+  }
+  await refetchList();
+  const kids = [h('h2', { id: 'sheetTitle' }, problems.length ? 'Mostly done' : 'All done'), h('p', {}, ok + ' item' + (ok === 1 ? '' : 's') + ' cleared from your list.')];
+  if (problems.length) kids.push(h('p', {}, 'Still on your list:'), h('ul', {}, problems.map(t => h('li', {}, t))));
+  if (stopped) kids.push(h('p', {}, 'Connection dropped. Run Done shopping again once you are back online.'));
+  kids.push(h('div', { class: 'actions' }, h('button', { type: 'button', class: 'go', onclick: () => { closeSheet(); refresh(); } }, 'Close')));
+  openSheet(kids);
+}
+
+/* ---------- pantry ---------- */
+function pantryRow(p) {
+  const st = S.stock[p.id];
+  const d = st && st.best ? daysUntil(st.best) : null;
+  const where = st ? st.locs.map(id => S.locations[id]).filter(Boolean).join(', ') : '';
+  const bits = [st ? fmtQty(st.amount) + ' at home' : 'None at home'];
+  if (where) bits.push(where);
+  if (st && st.best) bits.push('best before ' + fmtDay(st.best));
+  const tag = !st ? h('span', { class: 'tag bad' }, 'Out')
+    : d !== null && d <= 0 ? h('span', { class: 'tag bad' }, 'Expired')
+    : d !== null && d <= 3 ? h('span', { class: 'tag warn' }, d + 'd left') : null;
+  return h('div', { class: 'row' },
+    h('span', { class: 'body' }, h('div', { class: 'name' }, p.name), h('div', { class: 'sub wrap' }, bits.join(' · '))),
+    tag,
+    onList(p.id) ? h('span', { class: 'tag good' }, 'On list') : h('button', { type: 'button', class: 'addbtn', 'aria-label': 'Add ' + p.name + ' to the list', onclick: () => addProduct(p.id) }, '+ List'));
+}
+
+let showAllExpiring = false;
+function renderPantry() {
+  const host = $('pantryRows'); host.replaceChildren();
+  const q = $('pantryInput').value.trim().toLowerCase();
+  const all = Object.values(S.products).sort((a, b) => cmpName(a.name, b.name));
+  $('pantryCount').textContent = all.length ? all.length + ' products' : '';
+  if (!all.length) { host.append(h('p', { class: 'empty' }, "No pantry data yet. It loads once you're connected.")); return; }
+  if (q) {
+    const hits = all.filter(p => p.name.toLowerCase().includes(q));
+    if (!hits.length) host.append(h('p', { class: 'empty' }, 'Nothing called “' + $('pantryInput').value.trim() + '” in your products.'));
+    else host.append(h('div', { class: 'card' }, hits.map(pantryRow)));
+    return;
+  }
+  const expiring = all.filter(p => { const s = S.stock[p.id]; return s && s.best && daysUntil(s.best) <= 3; })
+    .sort((a, b) => S.stock[a.id].best.localeCompare(S.stock[b.id].best));
+  if (expiring.length) {
+    host.append(h('h3', {}, 'Expiring soon'));
+    const shown = showAllExpiring ? expiring : expiring.slice(0, 5);
+    const kids = shown.map(pantryRow);
+    if (expiring.length > shown.length) kids.push(h('button', { type: 'button', class: 'row', onclick: () => { showAllExpiring = true; renderPantry(); } }, h('span', { class: 'body' }, h('div', { class: 'name' }, 'Show all ' + expiring.length))));
+    host.append(h('div', { class: 'card' }, kids));
+  }
+  host.append(h('h3', {}, 'Everything'));
+  host.append(h('div', { class: 'card' }, all.map(pantryRow)));
+}
+
+/* ---------- wiring ---------- */
+function renderAll() { renderList(); renderAddResults(); renderPantry(); }
+
+function setTab(t) {
+  document.body.dataset.tab = t; LS.set(K_TAB, t);
+}
+
+$('tabList').addEventListener('click', () => setTab('list'));
+$('tabPantry').addEventListener('click', () => setTab('pantry'));
+$('refreshBtn').addEventListener('click', () => refresh());
+$('doneBtn').addEventListener('click', askDone);
+$('addInput').addEventListener('input', renderAddResults);
+$('addInput').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const q = $('addInput').value.trim(); if (!q) return;
+  const found = matches(q);
+  if (found.length) addProduct(found[0].id).then(() => { $('addInput').value = ''; renderAddResults(); });
+  else addNote(q);
+});
+$('pantryInput').addEventListener('input', renderPantry);
+$('sheet').addEventListener('click', e => { if (e.target === $('sheet')) closeSheet(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
+window.addEventListener('online', () => refresh());
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && (!S.syncedAt || Date.now() - S.syncedAt > 60000 || !S.online)) refresh();
+});
+
+if (LS.get(K_TAB, 'list') === 'pantry') setTab('pantry');
+loadCache(); renderAll(); setStatus(S.syncedAt ? 'offline' : 'syncing');
+refresh();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
+})();
+</script>
+</body>
+</html>
