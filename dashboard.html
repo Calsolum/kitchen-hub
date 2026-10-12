@@ -5207,6 +5207,10 @@ function markActivity() {
   lastActivityTime = Date.now();
 }
 document.addEventListener('pointerdown', markActivity, true);
+// Entering or leaving fullscreen counts as activity. Taps inside the cross-origin YouTube player never
+// reach this page, so after a long fullscreen stretch lastActivityTime is stale -- without this the
+// screen would black out within 30s of leaving fullscreen.
+document.addEventListener('fullscreenchange', markActivity);
 
 function enterSleep(reason) {
   if (sleepMode) return;
@@ -5254,6 +5258,9 @@ setInterval(updateSleepClock, 1000);
 
 function checkInactivity() {
   if (sleepMode) return;
+  // Never idle-sleep while something is fullscreen (the YouTube player): whoever put it there is
+  // watching it, and their taps can't reach this page. Overheating and manual sleep still apply.
+  if (document.fullscreenElement) return;
   if (Date.now() - lastActivityTime > INACTIVITY_SLEEP_MS) enterSleep('inactivity');
 }
 // Re-enabled 2026-09-27: was disabled 2026-09-01 as a diagnostic step to rule this out as a
