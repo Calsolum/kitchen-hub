@@ -306,6 +306,15 @@ body { font-family: 'DM Mono', monospace; min-height: 100vh; overflow: hidden; p
 .loading { text-align: center; color: var(--muted); font-size: 12px; padding: 20px; }
 #voice-modal { position: fixed; inset: 0; z-index: 300; display: none; align-items: flex-end; justify-content: center; padding-bottom: 40px; background: rgba(0,0,0,0.5); }
 #voice-modal.active { display: flex; }
+#power-modal { position: fixed; inset: 0; z-index: 9000; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.78); backdrop-filter: blur(8px); }
+#power-modal.active { display: flex; }
+.power-panel { background: var(--surface); backdrop-filter: blur(18px); border: 1px solid var(--border); border-radius: 24px; padding: 32px; width: 90vw; max-width: 460px; text-align: center; animation: slideUp 0.3s ease; }
+.power-title { font-family: 'DM Serif Display', serif; font-size: 28px; color: var(--text); margin-bottom: 12px; }
+.power-text { font-size: 12px; color: var(--muted); line-height: 1.7; margin-bottom: 26px; }
+.power-actions { display: flex; gap: 18px; }
+.power-btn { flex: 1; padding: 18px 10px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-family: inherit; font-size: 14px; cursor: pointer; }
+.power-btn.danger { border-color: rgba(245,96,96,0.55); background: rgba(245,96,96,0.14); color: var(--accent4); }
+.power-btn:disabled { opacity: 0.5; cursor: default; }
 .voice-panel { background: var(--surface); backdrop-filter: blur(18px); border: 1px solid var(--border); border-radius: 24px; padding: 30px; width: 90vw; max-width: 480px; text-align: center; animation: slideUp 0.3s ease; }
 .voice-mic { font-size: 48px; margin-bottom: 12px; display: block; }
 .voice-transcript { font-family: 'DM Serif Display', serif; font-size: 22px; color: var(--text); min-height: 36px; margin-bottom: 16px; }
@@ -353,6 +362,17 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
       <div class="wave-bar"></div>
     </div>
     <div style="font-size:13px;color:var(--accent);margin-bottom:16px;font-weight:bold;">TAP ANYWHERE TO STOP</div>
+  </div>
+</div>
+
+<div id="power-modal">
+  <div class="power-panel">
+    <div class="power-title" id="power-title"></div>
+    <div class="power-text" id="power-text"></div>
+    <div class="power-actions" id="power-actions">
+      <button class="power-btn" id="power-cancel-btn" onclick="closePowerModal()">Cancel</button>
+      <button class="power-btn danger" id="power-confirm-btn" onclick="confirmPower()"></button>
+    </div>
   </div>
 </div>
 
@@ -418,6 +438,11 @@ body.night-mode #bg-photo::after { opacity: 0.92; }
         <div onclick="openFocus('calendar');toggleOverflow()" style="display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:12px;cursor:pointer;border-radius:8px;color:var(--text);" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='transparent'"><svg viewBox="0 0 24 24" class="icon icon-inline"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span>Full Schedule</span></div>
         <div style="height:1px;background:var(--border);margin:4px 0;"></div>
         <div onclick="enterSleep('manual');toggleOverflow()" style="display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:12px;cursor:pointer;border-radius:8px;color:var(--text);" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='transparent'"><svg viewBox="0 0 24 24" class="icon icon-inline"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg><span>Sleep Now</span></div>
+        <div id="power-tray-items" style="display:none;">
+          <div style="height:1px;background:var(--border);margin:4px 0;"></div>
+          <div onclick="toggleOverflow();askPower('reboot')" style="display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:12px;cursor:pointer;border-radius:8px;color:var(--text);" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='transparent'"><svg viewBox="0 0 24 24" class="icon icon-inline"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg><span>Restart Pi</span></div>
+          <div onclick="toggleOverflow();askPower('poweroff')" style="display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:12px;cursor:pointer;border-radius:8px;color:var(--accent4);" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='transparent'"><svg viewBox="0 0 24 24" class="icon icon-inline"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg><span>Shut Down Pi</span></div>
+        </div>
       </div>
 
   <div class="main-grid">
@@ -3555,6 +3580,103 @@ document.addEventListener('click', function(e) {
   const btn = document.getElementById('overflow-btn');
   if (tray && !tray.contains(e.target) && !btn.contains(e.target)) tray.style.display = 'none';
 });
+// ---- Restart / shut down the Pi, from the kiosk only ----
+// /power/status says whether THIS browser is the kiosk; phones and guests get false, so they never
+// see the two tray entries (and the service refuses them anyway). A native confirm() is avoided on
+// the kiosk, so confirmation is our own panel with a far-apart Cancel / red confirm button.
+const POWER_COPY = {
+  reboot: {
+    title: 'Restart the Pi?', confirm: 'Restart', doing: 'Restarting…',
+    text: 'The dashboard goes offline for about a minute and then comes back by itself.',
+    after: 'This screen will go blank for a moment, then the dashboard comes back by itself (about a minute).',
+  },
+  poweroff: {
+    title: 'Shut down the Pi?', confirm: 'Shut down', doing: 'Shutting down…',
+    text: 'Everything stops. To turn it back on you have to press the Pi’s power button or unplug it and plug it back in.',
+    after: 'Give it about 20 seconds before unplugging. To start it again, press the Pi’s power button or unplug it and plug it back in.',
+  },
+};
+let powerAction = null;
+let powerBusy = false;
+let powerDismissTimer = null;
+let powerStatusTries = 0;
+
+async function checkPowerAllowed() {
+  let allowed = false;
+  try {
+    const res = await fetch('/power/status', { cache: 'no-store' });
+    allowed = !!(await res.json()).allowed;
+  } catch (e) {
+    // Service not up yet (e.g. the kiosk browser starts before it does) -- try again shortly.
+    if (++powerStatusTries < 10) setTimeout(checkPowerAllowed, 30000);
+    return;
+  }
+  const items = document.getElementById('power-tray-items');
+  if (items) items.style.display = allowed ? 'block' : 'none';
+}
+
+function askPower(action) {
+  if (powerBusy || !POWER_COPY[action]) return;
+  powerAction = action;
+  const copy = POWER_COPY[action];
+  document.getElementById('power-title').textContent = copy.title;
+  document.getElementById('power-text').textContent = copy.text;
+  const btn = document.getElementById('power-confirm-btn');
+  btn.textContent = copy.confirm;
+  btn.disabled = false;
+  btn.style.display = '';
+  document.getElementById('power-cancel-btn').textContent = 'Cancel';
+  document.getElementById('power-actions').style.display = 'flex';
+  document.getElementById('power-modal').classList.add('active');
+  // A forgotten confirmation must not sit there waiting for a stray tap.
+  clearTimeout(powerDismissTimer);
+  powerDismissTimer = setTimeout(closePowerModal, 30000);
+}
+
+function closePowerModal() {
+  if (powerBusy) return;
+  clearTimeout(powerDismissTimer);
+  powerAction = null;
+  document.getElementById('power-modal').classList.remove('active');
+}
+
+async function confirmPower() {
+  if (powerBusy || !powerAction) return;
+  const action = powerAction;
+  const copy = POWER_COPY[action];
+  const btn = document.getElementById('power-confirm-btn');
+  btn.disabled = true;
+  clearTimeout(powerDismissTimer);
+  try {
+    const res = await fetch('/power/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Kitchen-Power': '1' },
+      body: JSON.stringify({ action }),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'refused');
+  } catch (e) {
+    document.getElementById('power-text').textContent = 'That didn’t work (' + e.message + '). Nothing was changed.';
+    powerDismissTimer = setTimeout(closePowerModal, 8000);
+    btn.disabled = false;
+    return;
+  }
+  powerBusy = true;
+  document.getElementById('power-title').textContent = copy.doing;
+  document.getElementById('power-text').textContent = copy.after;
+  document.getElementById('power-actions').style.display = 'none';
+  // If this page is still alive well after that, the Pi did not go down -- say so instead of sitting here.
+  setTimeout(() => {
+    powerBusy = false;
+    document.getElementById('power-title').textContent = 'The Pi is still running';
+    document.getElementById('power-text').textContent = 'It did not ' + (action === 'reboot' ? 'restart' : 'shut down') + '. Nothing was changed.';
+    document.getElementById('power-confirm-btn').style.display = 'none';
+    document.getElementById('power-cancel-btn').textContent = 'Close';
+    document.getElementById('power-actions').style.display = 'flex';
+  }, 90000);
+}
+checkPowerAllowed();
+
 function openBrowser() {
   const url = prompt('Enter URL:', 'https://');
   if (url) openIframe(url);
@@ -5391,6 +5513,7 @@ function enterSleep(reason) {
   document.querySelector('.app').style.display = 'none';
   document.getElementById('iframe-overlay').style.display = 'none';
   document.getElementById('focus-overlay').classList.remove('active');
+  closePowerModal();   // never leave a restart/shut-down question waiting behind the sleep screen
   const reasonText = { manual: 'manual', inactivity: 'idle', temperature: 'high temperature' }[reason] || reason || '';
   document.getElementById('sleep-reason').textContent = reasonText ? ('zzz — ' + reasonText) : '';
   document.getElementById('sleep-overlay').classList.add('active');
