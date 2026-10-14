@@ -105,6 +105,7 @@ This isn't a one-click deploy — it's tuned to specific hardware (a Raspberry P
 7. Launch Chromium in kiosk mode pointed at your nginx host — see the comments in `dashboard.html` and the architecture diagram above for how the pieces fit together.
 8. Label printing (optional) needs a Niimbot BLE printer, [NiimPrintX](https://github.com/labbots/NiimPrintX) cloned locally, and `label_server.py`'s own Grocy API key filled in. NiimPrintX's upstream `bluetooth.py` and `printer.py` needed several fixes for this printer model — see the reverse-engineering note above — so expect to patch a fresh clone rather than using it as-is.
 9. Household consumables tracking (optional) needs its own Grocy product group and products created first (see `consumables_server.py`'s `BOX_SIZES` map for the expected product ids), and `CONSUMABLES_GROUP_ID` in `dashboard.html` set to match.
+10. Phone app away from home (optional): put the Pi and the phone on the same Tailscale network, enable HTTPS Certificates in the Tailscale admin console, set `server_name` in the last block of `nginx/nginx.conf` to the Pi's `*.ts.net` name, run `kitchen-tscert.sh` once as root (it writes `nginx/ts/ts.crt` and `ts.key` and reloads nginx), and schedule it weekly. Don't put the tailnet `server` block in place before those two files exist: nginx won't start without them.
 
 ## License
 

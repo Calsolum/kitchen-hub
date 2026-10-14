@@ -1,0 +1,87 @@
+    location /dashboard/ {
+        proxy_pass http://host.docker.internal:8080/;
+        proxy_set_header Host $host;
+    }
+
+    location /whisper/ {
+        proxy_pass http://whisper:9100/;
+        proxy_set_header Host $host;
+        proxy_read_timeout 30s;
+    }
+
+    location /calendar/ {
+        proxy_pass http://host.docker.internal:9200/;
+        proxy_set_header Host $host;
+    }
+
+    location /label/ {
+        proxy_pass http://host.docker.internal:9300/;
+        proxy_set_header Host $host;
+        proxy_read_timeout 120s;
+    }
+
+    location /consumables/ {
+        proxy_pass http://host.docker.internal:9400/;
+        proxy_set_header Host $host;
+    }
+
+    location /scan/ {
+        proxy_pass http://host.docker.internal:9500/;
+        proxy_set_header Host $host;
+    }
+
+    location /guestrequests/ {
+        proxy_pass http://host.docker.internal:9600/;
+        proxy_set_header Host $host;
+    }
+
+    # Restart / shut down the Pi (kiosk only). nginx sets X-Real-IP from the real connection so a
+    # client can't supply its own; power_server.py only honours it when it is one of the Pi's own
+    # addresses, i.e. the kiosk's browser. Phones and guests get "allowed: false".
+    location /power/ {
+        proxy_pass http://host.docker.internal:9700/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /mealie/ {
+        proxy_pass http://mealie:9000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Camera proxies -- inject the Home Assistant long-lived token server-side so it
+    # never has to reach client-side JS/HTML (a sanitized copy of dashboard.html is
+    # published publicly, so a token embedded there would leak). The browser only ever
+    # requests a plain same-origin URL; nginx does the authenticated call to HA.
+    location /camera/front_view/ {
+        proxy_pass http://host.docker.internal:8123/api/camera_proxy_stream/camera.front_view_fluent;
+        proxy_set_header Authorization "Bearer YOUR_HOME_ASSISTANT_LONG_LIVED_TOKEN";
+        proxy_set_header Host $host;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+
+    location /camera/backyard/ {
+        proxy_pass http://host.docker.internal:8123/api/camera_proxy_stream/camera.backyard_fluent;
+        proxy_set_header Authorization "Bearer YOUR_HOME_ASSISTANT_LONG_LIVED_TOKEN";
+        proxy_set_header Host $host;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+
+    location / {
+        proxy_pass http://grocy:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port 443;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }

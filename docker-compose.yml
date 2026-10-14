@@ -36,6 +36,8 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
       - ./nginx/kitchen.crt:/etc/nginx/certs/kitchen.crt
       - ./nginx/kitchen.key:/etc/nginx/certs/kitchen.key
+      - ./nginx/kitchen-locations.inc:/etc/nginx/kitchen-locations.inc:ro
+      - ./nginx/ts:/etc/nginx/ts:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
