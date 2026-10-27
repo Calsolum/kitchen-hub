@@ -37,15 +37,50 @@ FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 # bottom edges). No amount of font-size tuning inside the old 240px canvas
 # could ever have used the label's real width, since the canvas itself was
 # only ever a third as wide as the physical print area.
-LABEL_W, LABEL_H = 640, 394
-MARGIN = 20
 # Text rendered dead-center in the canvas printed visibly right-of-center on
 # the physical label (confirmed by direct printed test, not assumed) --
 # likely a small registration offset between this print head and where the
 # die-cut label's own left edge actually sits. Software can't correct the
 # printer's physical alignment, so nudge our own centering left to
 # compensate empirically.
-HORIZONTAL_SHIFT = -16
+#
+# Label stock presets (added 2026-10-27 when a bigger roll arrived). Which roll
+# is loaded is a fact about the printer, not about whoever is printing, so the
+# current preset is one persisted printer-wide setting that every route uses
+# (a request may still pass "preset" to override it). "w" runs across the print
+# head -- both stocks are 50 mm wide, so 640 px (~12.8 px/mm) -- and "h" runs
+# along the feed, so it is what has to match the label's length. "shift_x" /
+# "shift_y" are the empirical registration offsets described above, per stock.
+LABEL_PRESETS = {
+    "50x30": {"name": "50 × 30 mm", "w": 640, "h": 394, "margin": 20,
+              "shift_x": -16, "shift_y": 0, "qr_pin_top": True},
+    "50x80": {"name": "50 × 80 mm", "w": 640, "h": 1024, "margin": 20,
+              "shift_x": -16, "shift_y": 0, "qr_pin_top": False},
+}
+DEFAULT_PRESET = "50x30"
+PRESET_FILE = os.path.expanduser("~/.label_preset")
+
+
+def get_preset_id():
+    try:
+        with open(PRESET_FILE) as f:
+            pid = f.read().strip()
+        if pid in LABEL_PRESETS:
+            return pid
+    except OSError:
+        pass
+    return DEFAULT_PRESET
+
+
+def set_preset_id(pid):
+    with open(PRESET_FILE, "w") as f:
+        f.write(pid)
+
+
+def _preset(pid=None):
+    """The preset dict for `pid` (default: the one currently loaded in the printer)."""
+    pid = pid if pid in LABEL_PRESETS else get_preset_id()
+    return dict(LABEL_PRESETS[pid], id=pid)
 
 
 def _wrap(draw, text, font, max_width):
@@ -179,7 +214,9 @@ def _grow_lines_independently(draw, lines, base_size, font_path, max_w, slack):
     return results, slack
 
 
-def render_label(title, subtitle=None, extra_lines=None):
+def render_label(title, subtitle=None, extra_lines=None, preset=None):
+    p = _preset(preset)
+    LABEL_W, LABEL_H, MARGIN, HORIZONTAL_SHIFT = p["w"], p["h"], p["margin"], p["shift_x"]
     img = Image.new("L", (LABEL_W, LABEL_H), 255)
     draw = ImageDraw.Draw(img)
     # A small fixed safety margin absorbs sub-pixel rounding between what
@@ -234,7 +271,7 @@ def render_label(title, subtitle=None, extra_lines=None):
     heights = [h for _, _, h in title_blocks] + [h for _, _, h in sub_blocks]
 
     total_h = sum(heights)
-    y = max(MARGIN, (LABEL_H - total_h) // 2)
+    y = max(MARGIN, (LABEL_H - total_h) // 2) + p["shift_y"]
     for (text, font), h in zip(blocks, heights):
         l, t, r, b = draw.textbbox((0, 0), text, font=font)
         w = r - l
@@ -251,7 +288,7 @@ def render_label(title, subtitle=None, extra_lines=None):
     return img
 
 
-def render_qr_label(data, caption=None):
+def render_qr_label(data, caption=None, preset=None):
     """A QR code (optionally captioned) on the same physical canvas/margins/
     registration-offset as render_label() -- HORIZONTAL_SHIFT corrects for a
     print-head/label-edge misalignment that's physical, not text-specific, so
@@ -266,7 +303,13 @@ def render_qr_label(data, caption=None):
     already had to correct for with HEIGHT_FIT_SAFETY, just discovered here
     via an actual print rather than assumed up front. Pin content to the top
     margin and give the bottom noticeably more real clearance, rather than
-    splitting the difference evenly."""
+    splitting the difference evenly.
+
+    That pin-to-top layout is the 50x30 stock's ("qr_pin_top"); on a tall label
+    the same block would hug the top edge with a big empty area below, so
+    there it is centered vertically instead."""
+    p = _preset(preset)
+    LABEL_W, LABEL_H, MARGIN, HORIZONTAL_SHIFT = p["w"], p["h"], p["margin"], p["shift_x"]
     img = Image.new("L", (LABEL_W, LABEL_H), 255)
     draw = ImageDraw.Draw(img)
 
@@ -290,7 +333,11 @@ def render_qr_label(data, caption=None):
     qr_img = qr_img.resize((qr_size, qr_size), Image.NEAREST)
 
     x = (LABEL_W - qr_size) // 2 + HORIZONTAL_SHIFT
-    y = MARGIN_TOP
+    if p["qr_pin_top"]:
+        y = MARGIN_TOP
+    else:
+        y = max(MARGIN_TOP, (LABEL_H - (cap_h + qr_size)) // 2)
+    y += p["shift_y"]
     if caption:
         cap_bbox = draw.textbbox((0, 0), caption, font=cap_font)
         cap_w = cap_bbox[2] - cap_bbox[0]
@@ -301,6 +348,52 @@ def render_qr_label(data, caption=None):
         y_qr = y
 
     img.paste(qr_img, (x, y_qr))
+    return img
+
+
+def render_calibration(preset=None):
+    """A ruler-and-frame test card for measuring where a canvas really lands on
+    the physical label (what the original 640-px-wide fix was found with).
+
+    Print it, photograph the label, and read off: which ticks survive at each
+    label edge (the canvas px that fall outside the label are lost), how far the
+    frame sits from the label's real edges, and how many rows the label really
+    is. Ticks run inward from all four canvas edges: small every 16 px, medium
+    every 64 px, long every 128 px and numbered with their canvas position
+    (x along the top, y down the left). The centre cross marks where the
+    canvas centre falls, which is what centring errors show up against."""
+    p = _preset(preset)
+    W, H = p["w"], p["h"]
+    img = Image.new("L", (W, H), 255)
+    d = ImageDraw.Draw(img)
+    font = ImageFont.truetype(FONT_BOLD, 22)
+    d.rectangle((0, 0, W - 1, H - 1), outline=0, width=3)
+
+    def tick_len(v):
+        return 40 if v % 128 == 0 else 24 if v % 64 == 0 else 10
+
+    for x in range(16, W, 16):
+        n = tick_len(x)
+        d.line((x, 0, x, n), fill=0, width=2)
+        d.line((x, H - 1, x, H - 1 - n), fill=0, width=2)
+        if x % 128 == 0:
+            d.text((x - 14, n + 4), str(x), font=font, fill=0)
+    for y in range(16, H, 16):
+        n = tick_len(y)
+        d.line((0, y, n, y), fill=0, width=2)
+        d.line((W - 1, y, W - 1 - n, y), fill=0, width=2)
+        if y % 128 == 0:
+            d.text((n + 6, y - 11), str(y), font=font, fill=0)
+    cx, cy = W // 2, H // 2
+    d.line((cx - 60, cy, cx + 60, cy), fill=0, width=2)
+    d.line((cx, cy - 60, cx, cy + 60), fill=0, width=2)
+    title_font = ImageFont.truetype(FONT_BOLD, 34)
+    for i, text in enumerate((p["name"], f"{W} x {H} px", "TEST CARD")):
+        ty = cy + 90 + i * 46
+        if ty + 40 > H - 50:     # the short stock has no room for all three lines
+            break
+        w = d.textbbox((0, 0), text, font=title_font)[2]
+        d.text(((W - w) // 2, ty), text, font=title_font, fill=0)
     return img
 
 
@@ -429,7 +522,7 @@ def preview():
     lines = [str(l).strip() for l in data.get('lines', []) if str(l).strip()]
     if not lines:
         return jsonify(error="No text provided"), 400
-    img = render_label(lines[0], extra_lines=lines[1:])
+    img = render_label(lines[0], extra_lines=lines[1:], preset=data.get('preset'))
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     b64 = base64.b64encode(buf.getvalue()).decode('ascii')
@@ -443,7 +536,7 @@ def preview_qrcode():
     caption = (data.get('caption') or '').strip() or None
     if not payload:
         return jsonify(error="No data provided"), 400
-    img = render_qr_label(payload, caption=caption)
+    img = render_qr_label(payload, caption=caption, preset=data.get('preset'))
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     b64 = base64.b64encode(buf.getvalue()).decode('ascii')
@@ -458,7 +551,7 @@ def print_qrcode():
     quantity = max(1, min(10, int(data.get('quantity', 1))))
     if not payload:
         return jsonify(success=False, error="No data provided"), 400
-    img = render_qr_label(payload, caption=caption)
+    img = render_qr_label(payload, caption=caption, preset=data.get('preset'))
     job_id = start_print_job(img, quantity)
     return jsonify(job_id=job_id)
 
@@ -472,7 +565,7 @@ def print_text():
         return jsonify(success=False, error="No text provided"), 400
     if len(lines) > 4:
         return jsonify(success=False, error="Max 4 lines"), 400
-    img = render_label(lines[0], extra_lines=lines[1:])
+    img = render_label(lines[0], extra_lines=lines[1:], preset=data.get('preset'))
     job_id = start_print_job(img, quantity)
     return jsonify(job_id=job_id)
 
@@ -494,6 +587,41 @@ def print_product(product_id):
     subtitle = f"Exp: {best_before}" if best_before else None
     img = render_label(name, subtitle=subtitle)
     job_id = start_print_job(img, quantity)
+    return jsonify(job_id=job_id)
+
+
+@app.route('/presets')
+def presets():
+    return jsonify(
+        current=get_preset_id(),
+        presets=[{"id": k, "name": v["name"], "w": v["w"], "h": v["h"]} for k, v in LABEL_PRESETS.items()],
+    )
+
+
+@app.route('/preset', methods=['POST'])
+def set_preset():
+    data = request.get_json(force=True, silent=True) or {}
+    pid = data.get('preset')
+    if pid not in LABEL_PRESETS:
+        return jsonify(success=False, error="Unknown preset"), 400
+    set_preset_id(pid)
+    return jsonify(success=True, current=pid)
+
+
+@app.route('/preview/calibration', methods=['POST'])
+def preview_calibration():
+    data = request.get_json(force=True, silent=True) or {}
+    img = render_calibration(preset=data.get('preset'))
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return jsonify(image="data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('ascii'))
+
+
+@app.route('/print/calibration', methods=['POST'])
+def print_calibration():
+    data = request.get_json(force=True, silent=True) or {}
+    img = render_calibration(preset=data.get('preset'))
+    job_id = start_print_job(img, 1)
     return jsonify(job_id=job_id)
 
 
