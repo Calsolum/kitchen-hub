@@ -1,0 +1,13 @@
+[Unit]
+Description=Kitchen Hub Teamosa service (tea settings, schedule and Brew now; kiosk and tailnet only)
+After=network.target bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+ExecStart=/usr/bin/python3 -m teamosa.server
+WorkingDirectory=/home/kitchenpi/teamosa
+Restart=always
+User=kitchenpi
+
+[Install]
+WantedBy=multi-user.target

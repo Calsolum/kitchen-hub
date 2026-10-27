@@ -1,0 +1,24 @@
+/* Tea: the Teamosa brewer panel (see loadTeaFocus) and its Brew-now confirm */
+#tea-modal { position: fixed; inset: 0; z-index: 9000; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.78); backdrop-filter: blur(8px); }
+#tea-modal.active { display: flex; }
+.power-btn.tea-go, .tea-btn.go { border-color: rgba(200,245,96,0.55); background: rgba(200,245,96,0.14); color: var(--accent); }
+.tea-next { font-size: 13px; color: var(--text); margin: -8px 0 8px; line-height: 1.5; }
+.tea-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tea-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.tea-days { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.tea-chip { min-width: 48px; padding: 11px 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-family: inherit; font-size: 12px; cursor: pointer; }
+.tea-chip.on { border-color: var(--accent); color: var(--accent); background: rgba(200,245,96,0.1); }
+.tea-toggle { min-width: 84px; font-size: 14px; }
+.tea-stepper { display: flex; align-items: center; gap: 8px; }
+.tea-step { min-width: 46px; height: 46px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-family: inherit; font-size: 15px; cursor: pointer; }
+.tea-step:disabled { opacity: 0.35; cursor: default; }
+.tea-step:active:not(:disabled), .tea-chip:active, .tea-btn:active:not(:disabled) { transform: scale(0.96); }
+.tea-value { font-family: 'DM Serif Display', serif; font-size: 26px; color: var(--accent2); min-width: 104px; text-align: center; font-variant-numeric: tabular-nums; }
+.tea-actions { display: flex; gap: 14px; margin-top: 20px; }
+.tea-btn { flex: 1; padding: 16px 10px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-family: inherit; font-size: 14px; cursor: pointer; }
+.tea-btn:disabled { opacity: 0.5; cursor: default; }
+/* Fixed two-line height: the panel must not change height when it redraws, or a scrolled panel
+   fires a scroll event and the dashboard's drag guard swallows the next tap. */
+.tea-msg { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 14px; height: 3.2em; overflow: hidden; }
+.tea-msg.bad { color: var(--accent4); }
+.tea-hint { font-size: 10px; color: var(--muted); margin-top: 10px; opacity: 0.8; }

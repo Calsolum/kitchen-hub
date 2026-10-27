@@ -44,6 +44,14 @@
         proxy_set_header X-Real-IP $remote_addr;
     }
 
+    # Teamosa tea brewer (kitchen-teamosa: ~/teamosa/teamosa/server.py). Kiosk and tailnet only:
+    # like /power/, it trusts X-Real-IP only from nginx, and nginx overwrites whatever a client sent.
+    location /teamosa/ {
+        proxy_pass http://host.docker.internal:9800/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
     location /mealie/ {
         proxy_pass http://mealie:9000/;
         proxy_set_header Host $host;
