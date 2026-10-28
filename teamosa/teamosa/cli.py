@@ -4,6 +4,7 @@
   python3 -m teamosa brew --temp 95 --time 3.5 --dry-run   # print the frame, no Bluetooth
   python3 -m teamosa check                                  # connect, report cup/water/lid; sends nothing
   python3 -m teamosa brew                                   # temp/time from TEAMOSA_TEMP / TEAMOSA_TIME
+  python3 -m teamosa brew --force ...                       # even within 30 min of the last brew
 
 Exit codes: 0 ok, 2 bad arguments, 3 machine not ready (nothing sent), 4 could not
 connect, 5 write failed (unknown whether it brewed), 6 too soon after the last
@@ -27,6 +28,9 @@ DEFAULT_ADDRESS = "AA:BB:CC:DD:EE:FF"   # set TEAMOSA_ADDRESS to your brewer's B
 EXIT_OK, EXIT_NOT_READY, EXIT_CONNECT, EXIT_WRITE, EXIT_TOO_SOON, EXIT_LOCKED = 0, 3, 4, 5, 6, 7
 # Outcomes after which the machine may have brewed; they count towards --min-gap.
 BREW_OUTCOMES = {"brewed", "write_unknown"}
+# The machine has no cancel and reports nothing while it brews, so a second brew this soon
+# is refused unless --force (the dashboard's Brew anyway; the schedule never forces).
+MIN_GAP_MIN = 30
 
 
 def _env_float(name):
@@ -56,9 +60,9 @@ def build_parser():
                       help="minutes, 3..9.5 in steps of 0.5 (env TEAMOSA_TIME)")
     brew.add_argument("--dry-run", action="store_true",
                       help="print the frame and exit without using Bluetooth")
-    brew.add_argument("--force", action="store_true", help="ignore --min-gap")
-    brew.add_argument("--min-gap", type=float, default=30,
-                      help="refuse if the last brew was less than this many minutes ago (default 30)")
+    brew.add_argument("--force", action="store_true", help="brew even within --min-gap of the last brew")
+    brew.add_argument("--min-gap", type=float, default=MIN_GAP_MIN,
+                      help=f"refuse if the last brew was less than this many minutes ago (default {MIN_GAP_MIN})")
     brew.add_argument("--extended", action="store_true",
                       help="allow values outside the app's range (untested on the machine)")
     brew.add_argument("--listen", type=float, default=10,
@@ -82,7 +86,8 @@ def _lock(state_dir):
     return handle
 
 
-def _last_brew_ts(state_dir):
+def last_brew_ts(state_dir):
+    """Start time (epoch seconds) of the last run that may have brewed, or None."""
     last = None
     try:
         with open(state_dir / "runs.jsonl") as f:
@@ -126,6 +131,8 @@ async def _run(args, frame):
     record = {"ts": time.time(), "time": datetime.now().isoformat(timespec="seconds"),
               "command": args.command, "address": args.address,
               "frame": frame.decode("ascii") if frame else None}
+    if not check and args.force:
+        record["forced"] = True
     try:
         result = await device.run(args.address, frame or b"", preflight_s=args.preflight,
                                   listen_s=0 if check else args.listen,
@@ -191,13 +198,15 @@ def main(argv=None):
         log.error("another teamosa run is in progress")
         return EXIT_LOCKED
     try:
-        if args.command == "brew" and not args.force:
-            last = _last_brew_ts(args.state_dir)
+        if args.command == "brew":
+            last = last_brew_ts(args.state_dir)
             if last is not None and time.time() - last < args.min_gap * 60:
                 ago = (time.time() - last) / 60
-                log.error("last brew was %.0f min ago (min gap %g); use --force to brew anyway",
-                          ago, args.min_gap)
-                return EXIT_TOO_SOON
+                if not args.force:
+                    log.error("last brew was %.0f min ago (min gap %g); use --force to brew anyway",
+                              ago, args.min_gap)
+                    return EXIT_TOO_SOON
+                log.warning("last brew was %.0f min ago; brewing anyway (--force)", ago)
         return asyncio.run(_run(args, frame))
     finally:
         lock.close()

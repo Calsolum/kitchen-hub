@@ -3,6 +3,9 @@
 // /teamosa/status says whether THIS device may use it: the kiosk and Tariq's devices on
 // Tailscale. Guests get {allowed:false}, never see the tile, and the service refuses them
 // anyway. Edits save themselves after a short pause; Brew now asks first in its own panel.
+// The service refuses a plain brew within 30 minutes of the last one (the brewer can't be
+// stopped or asked whether it's busy), so meanwhile the button reads Brew anyway: its confirm
+// says when the last brew started, and only it sends force. The schedule never forces.
 //
 // The panel is built once (teaBuild) and afterwards only updated in place (teaUpdate): text,
 // classes and disabled flags, never replaced nodes. Replacing the element under a finger
@@ -17,6 +20,7 @@ let teaPollTimer = null;
 let teaMsg = '';            // feedback from the last save / button press
 let teaMsgBad = false;
 let teaStatusTries = 0;
+let teaForce = false;       // the open confirm is Brew anyway
 
 async function checkTeaAllowed() {
   let allowed = false;
@@ -39,6 +43,7 @@ function teaPanelOpen() {
 function teaClock(h, m) { return new Date(2000, 0, 1, h, m).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
 function teaWhen(iso) { return new Date(iso).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }); }
 function teaMinutes(m) { return (m % 1 ? m.toFixed(1) : m.toFixed(0)) + ' min'; }
+function teaTooSoon(st) { return !!(st && st.last_brew && st.last_brew.too_soon); }
 function teaSet(id, text) {
   const el = document.getElementById(id);
   if (el && el.textContent !== text) el.textContent = text;
@@ -130,6 +135,9 @@ function teaUpdate() {
     'tea-check': st.busy, 'tea-brew': st.busy,
   };
   buttons.forEach(b => { b.disabled = !!off[b.id]; });
+  const anyway = teaTooSoon(st);
+  teaSet('tea-brew', anyway ? 'Brew anyway' : 'Brew now');
+  document.getElementById('tea-brew').classList.toggle('anyway', anyway);
   const [msg, bad] = teaMsg && !(st.action && st.action.running) ? [teaMsg, teaMsgBad] : teaResult(st);
   teaSet('tea-msg', msg);
   document.getElementById('tea-msg').classList.toggle('bad', bad);
@@ -221,10 +229,20 @@ async function teaCheck() {
 
 async function teaAskBrew() {
   if (teaSaveTimer && !(await teaSave())) return;   // don't brew with settings that didn't save
-  const s = teaState.settings;
-  document.getElementById('tea-modal-text').textContent =
+  const s = teaState.settings, last = teaState.last_brew;
+  teaForce = teaTooSoon(teaState);
+  let warn = '';
+  if (teaForce) {
+    const ago = last.minutes_ago >= 1 ? `${last.minutes_ago} min ago` : 'less than a minute ago';
+    warn = `The last brew started ${ago}. Only brew again once it has finished: the brewer can’t be stopped. `;
+  }
+  document.querySelector('#tea-modal .power-title').textContent = teaForce ? 'Brew anyway?' : 'Brew now?';
+  document.getElementById('tea-modal-text').textContent = warn +
     `${s.temp} °C for ${teaMinutes(s.minutes)}. Check there’s water in the tank, tea in the basket and a cup on the sensor.`;
-  document.getElementById('tea-modal-go').disabled = false;
+  const go = document.getElementById('tea-modal-go');
+  go.textContent = teaForce ? 'Brew anyway' : 'Brew';
+  go.classList.toggle('anyway', teaForce);
+  go.disabled = false;
   document.getElementById('tea-modal').classList.add('active');
 }
 function teaCloseModal() { document.getElementById('tea-modal').classList.remove('active'); }
@@ -232,7 +250,7 @@ function teaCloseModal() { document.getElementById('tea-modal').classList.remove
 async function teaConfirmBrew() {
   document.getElementById('tea-modal-go').disabled = true;
   try {
-    const { res, data } = await teaPost('/teamosa/brew', { confirm: true });
+    const { res, data } = await teaPost('/teamosa/brew', teaForce ? { confirm: true, force: true } : { confirm: true });
     if (res.status === 202) { teaState = data; teaMsg = ''; teaMsgBad = false; }
     else { teaMsg = res.status === 409 ? 'The brewer is busy; try again in a minute.' : 'Not started: ' + (data.error || res.status); teaMsgBad = true; }
   } catch (e) {

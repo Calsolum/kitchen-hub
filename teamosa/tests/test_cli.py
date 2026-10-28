@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import time
+import types
 import unittest
 import unittest.mock
 
@@ -73,7 +74,22 @@ class Guards(unittest.TestCase):
 
     def test_skipped_runs_do_not_count(self):
         self._write_runs({"ts": time.time() - 60, "outcome": "not_ready"})
-        self.assertIsNone(cli._last_brew_ts(cli.Path(self.dir.name)))
+        self.assertIsNone(cli.last_brew_ts(cli.Path(self.dir.name)))
+
+    def test_force_brews_inside_the_gap_and_records_it(self):
+        self._write_runs({"ts": time.time() - 60, "outcome": "brewed"})
+        # A stand-in for teamosa.device, so this never touches Bluetooth.
+        fake = types.SimpleNamespace(Skipped=type("Skipped", (Exception,), {}),
+                                     WriteFailed=type("WriteFailed", (Exception,), {}),
+                                     run=unittest.mock.AsyncMock(return_value={"attempts": 1}))
+        with unittest.mock.patch("teamosa.device", fake, create=True), \
+                contextlib.redirect_stderr(io.StringIO()):
+            code = cli.main(["brew", "--temp", "60", "--time", "3", "--force"] + BOGUS + self.state)
+        self.assertEqual(code, cli.EXIT_OK)
+        fake.run.assert_awaited_once()
+        with open(os.path.join(self.dir.name, "last_run.json")) as f:
+            record = json.load(f)
+        self.assertEqual((record["outcome"], record["forced"]), ("brewed", True))
 
     def test_lock_held(self):
         held = cli._lock(cli.Path(self.dir.name))

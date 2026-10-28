@@ -35,6 +35,14 @@ class FakeRunner:
         return self.code
 
 
+def brewed(home, minutes_before, now=MON_0644):
+    """Record a brew the CLI would have logged, `minutes_before` minutes before `now`."""
+    state = os.path.join(home, "state")
+    os.makedirs(state, exist_ok=True)
+    with open(os.path.join(state, "runs.jsonl"), "a") as f:
+        f.write(json.dumps({"ts": now.timestamp() - minutes_before * 60, "outcome": "brewed"}) + "\n")
+
+
 def wait_idle(hub):
     for _ in range(200):
         if not hub.lock.locked():
@@ -153,6 +161,7 @@ class Routes(unittest.TestCase):
     def test_brew_needs_confirm(self):
         self.assertEqual(self.client.post("/brew", json={}).status_code, 400)
         self.assertEqual(self.client.post("/brew", data="confirm=true").status_code, 400)
+        self.assertEqual(self.client.post("/brew", json=[True]).status_code, 400)
         self.assertEqual(self.runner.calls, [])
 
     def test_brew_now_uses_saved_settings(self):
@@ -163,6 +172,26 @@ class Routes(unittest.TestCase):
         self.assertEqual(self.runner.calls,
                          [["brew", "--state-dir", state, "--temp", "80", "--time", "4.0"]])
         self.assertEqual(self.hub.action["exit"], 0)
+
+    def test_status_says_when_a_plain_brew_would_be_refused(self):
+        self.assertIsNone(self.client.get("/status").get_json()["last_brew"])
+        brewed(self.tmp.name, 31)
+        self.assertFalse(self.client.get("/status").get_json()["last_brew"]["too_soon"])
+        brewed(self.tmp.name, 6)
+        self.assertEqual(self.client.get("/status").get_json()["last_brew"],
+                         {"time": "2026-10-26T06:38:59", "minutes_ago": 6, "too_soon": True})
+
+    def test_brew_anyway_passes_force(self):
+        brewed(self.tmp.name, 6)
+        self.assertEqual(self.client.post("/brew", json={"confirm": True, "force": True}).status_code, 202)
+        wait_idle(self.hub)
+        self.assertEqual(self.runner.calls[0][-1], "--force")
+
+    def test_force_must_be_true_or_false(self):
+        for bad in ["true", 1, None]:
+            r = self.client.post("/brew", json={"confirm": True, "force": bad})
+            self.assertEqual(r.status_code, 400, bad)
+        self.assertEqual(self.runner.calls, [])
 
     def test_check(self):
         self.assertEqual(self.client.post("/check", json={}).status_code, 400)
@@ -202,6 +231,12 @@ class Tick(unittest.TestCase):
         runner = FakeRunner()
         server.Hub(self.tmp.name, runner=runner, clock=lambda: MON_0644).tick()
         self.assertEqual(runner.calls, [])
+
+    def test_schedule_never_forces(self):
+        brewed(self.tmp.name, 6)
+        runner = FakeRunner()
+        server.Hub(self.tmp.name, runner=runner, clock=lambda: MON_0645).tick()
+        self.assertNotIn("--force", runner.calls[0])
 
 
 if __name__ == "__main__":

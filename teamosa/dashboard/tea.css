@@ -2,6 +2,8 @@
 #tea-modal { position: fixed; inset: 0; z-index: 9000; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.78); backdrop-filter: blur(8px); }
 #tea-modal.active { display: flex; }
 .power-btn.tea-go, .tea-btn.go { border-color: rgba(200,245,96,0.55); background: rgba(200,245,96,0.14); color: var(--accent); }
+/* Brew anyway (within 30 min of the last brew): amber, so it doesn't pass for the everyday button */
+.power-btn.tea-go.anyway, .tea-btn.go.anyway { border-color: rgba(245,166,35,0.55); background: rgba(245,166,35,0.14); color: var(--accent3); }
 .tea-next { font-size: 13px; color: var(--text); margin: -8px 0 8px; line-height: 1.5; }
 .tea-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .tea-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }

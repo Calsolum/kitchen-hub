@@ -1,6 +1,7 @@
-"""Replace the Tea panel's JS block in the live dashboard with a new version.
+"""Replace one Tea block (the tea.js or tea.css text) in the live dashboard with a new version.
 
   python3 swap_tea_js.py index.html old_tea.js new_tea.js
+  python3 swap_tea_js.py index.html old_tea.css new_tea.css
 
 Only the exact old block changes, so edits other sessions made elsewhere in the file are kept.
 Refuses unless the old block occurs exactly once, and if the file changes while it works.
@@ -32,4 +33,4 @@ if path.read_bytes() != before:
     tmp.unlink()
     sys.exit("file changed while patching; nothing written")
 os.replace(tmp, path)
-print(f"swapped Tea JS: {len(before)} -> {len(out)} bytes")
+print(f"swapped {sys.argv[3]}: {len(before)} -> {len(out)} bytes")

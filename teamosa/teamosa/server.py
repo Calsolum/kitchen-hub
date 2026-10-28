@@ -5,6 +5,10 @@ Runs as kitchen-teamosa.service (`python3 -m teamosa.server`, port 9800) behind 
 runs `python3 -m teamosa brew`, which does the pre-flight check, the single write, the
 30-minute gap and the lock. Settings live in ~/teamosa/settings.json.
 
+The only way past the gap is the dashboard's Brew anyway (POST /brew with "force": true),
+which a person confirms after being told when the last brew started. The schedule never
+forces.
+
 Who may use it: the kiosk and Tariq's devices on Tailscale. Anyone else on the Wi-Fi
 (guests) gets 403 and never sees the Tea button. The client address comes from nginx's
 X-Real-IP, believed only when the TCP peer is nginx's docker network or loopback -- the
@@ -27,7 +31,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request
 
-from . import protocol
+from . import cli, protocol
 
 log = logging.getLogger("teamosa.server")
 
@@ -45,7 +49,7 @@ EXIT_MESSAGES = {
     3: "The brewer reported a problem (cup, water or lid), so nothing was sent.",
     4: "Couldn't reach the brewer over Bluetooth. Nothing was sent.",
     5: "The brew command failed partway. Check the brewer.",
-    6: "A brew ran less than 30 minutes ago, so this one was refused.",
+    6: f"A brew started less than {cli.MIN_GAP_MIN} minutes before, so this one was refused.",
     7: "Another brew or check was already running.",
 }
 
@@ -204,10 +208,12 @@ class Hub:
         self._write_json(self.settings_path, settings)
 
     # -- running the CLI -------------------------------------------------------
-    def _cli_args(self, command, settings=None):
+    def _cli_args(self, command, settings=None, force=False):
         args = [command, "--state-dir", str(self.state_dir)]
         if command == "brew":
             args += ["--temp", str(settings["temp"]), "--time", str(settings["minutes"])]
+            if force:
+                args.append("--force")   # only from the dashboard's Brew anyway, never the schedule
         return args
 
     def _execute(self, kind, args, retries_on_lock=0):
@@ -266,6 +272,16 @@ class Hub:
             time.sleep(10 - time.time() % 10)
 
     # -- what the dashboard sees -----------------------------------------------
+    def last_brew(self):
+        """When the last brew (or uncertain brew) started, and whether a plain brew is refused yet."""
+        ts = cli.last_brew_ts(self.state_dir)
+        if ts is None:
+            return None
+        started = datetime.fromtimestamp(ts)
+        ago_s = (self.clock() - started).total_seconds()
+        return {"time": _now_iso(started), "minutes_ago": max(0, round(ago_s / 60)),
+                "too_soon": ago_s < cli.MIN_GAP_MIN * 60}
+
     def status(self, allowed, kiosk):
         if not allowed:
             return {"allowed": False}
@@ -281,6 +297,7 @@ class Hub:
             "busy": self.lock.locked(),
             "action": self.action,
             "last_run": self._read_json(self.state_dir / "last_run.json", None),
+            "last_brew": self.last_brew(),
             "limits": {"temp_min": protocol.MIN_TEMP_C, "temp_max": protocol.MAX_TEMP_C,
                        "temp_step": protocol.TEMP_STEP_C, "minutes_min": protocol.MIN_MINUTES,
                        "minutes_max": protocol.MAX_MINUTES, "minutes_step": 0.5},
@@ -295,6 +312,10 @@ def create_app(hub):
 
     def refused():
         return jsonify({"allowed": False, "error": "not allowed from this device"}), 403
+
+    def json_body():
+        body = request.get_json(silent=True)
+        return body if isinstance(body, dict) else {}
 
     @app.after_request
     def no_store(resp):
@@ -324,7 +345,7 @@ def create_app(hub):
         ip, allowed, kiosk = access()
         if not allowed:
             return refused()
-        if (request.get_json(silent=True) or {}).get("go") is not True:
+        if json_body().get("go") is not True:
             return jsonify({"error": "send {\"go\": true}"}), 400
         if not hub.start("check", hub._cli_args("check")):
             return jsonify({"error": "busy"}), 409
@@ -336,12 +357,17 @@ def create_app(hub):
         ip, allowed, kiosk = access()
         if not allowed:
             return refused()
-        if (request.get_json(silent=True) or {}).get("confirm") is not True:
+        body = json_body()
+        if body.get("confirm") is not True:
             return jsonify({"error": "send {\"confirm\": true}"}), 400
+        force = body.get("force", False)
+        if not isinstance(force, bool):
+            return jsonify({"error": "force must be true or false"}), 400
         current = hub.load_settings()
-        if not hub.start("brew", hub._cli_args("brew", current)):
+        if not hub.start("brew", hub._cli_args("brew", current, force=force)):
             return jsonify({"error": "busy"}), 409
-        log.info("brew now started by %s: %s C, %s min", ip, current["temp"], current["minutes"])
+        log.info("brew %s started by %s: %s C, %s min", "anyway" if force else "now", ip,
+                 current["temp"], current["minutes"])
         return jsonify(hub.status(allowed, kiosk)), 202
 
     return app
