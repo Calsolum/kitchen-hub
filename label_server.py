@@ -9,7 +9,7 @@ import threading
 import traceback
 
 from flask import Flask, request, jsonify
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 import qrcode
 import requests
 import urllib3
@@ -54,8 +54,19 @@ FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 LABEL_PRESETS = {
     "50x30": {"name": "50 × 30 mm", "w": 640, "h": 394, "margin": 20,
               "shift_x": -16, "shift_y": 0, "qr_pin_top": True},
-    "50x80": {"name": "50 × 80 mm", "w": 640, "h": 1024, "margin": 20,
-              "shift_x": -16, "shift_y": 0, "qr_pin_top": False},
+    # Measured from a printed /print/calibration card (2026-10-27): this printer is
+    # 300 dpi (~11.8 px/mm both ways), so 640 px is ~54 mm, wider than the label.
+    # The 50 mm label covers bitmap columns ~-6..582 (centre ~288) and rows ~-9..935
+    # (the first printed row lands ~0.8 mm below the label's top edge). So layouts
+    # use only area_w = 577 columns (0..576, centred on 288) and h = 927 rows
+    # (0..926, centred on the label's 463), and the bitmap the printer gets is still
+    # 640 wide -- area_x says where the layout sits in it. A 1024-row card ran
+    # ~88 rows past the label's bottom edge onto the gap and the next label.
+    # "ink_centre" centres each line's real ink rather than its textbbox (see
+    # _ink_x); the 50x30 stock keeps the old centring its shift_x was tuned with.
+    "50x80": {"name": "50 × 80 mm", "w": 640, "h": 927, "area_x": 0, "area_w": 577,
+              "margin": 20, "shift_x": 0, "shift_y": 0, "qr_pin_top": False,
+              "ink_centre": True},
 }
 DEFAULT_PRESET = "50x30"
 PRESET_FILE = os.path.expanduser("~/.label_preset")
@@ -81,6 +92,27 @@ def _preset(pid=None):
     """The preset dict for `pid` (default: the one currently loaded in the printer)."""
     pid = pid if pid in LABEL_PRESETS else get_preset_id()
     return dict(LABEL_PRESETS[pid], id=pid)
+
+
+def _area_w(p):
+    """Width the layout is centred in: the label's own printable columns where they
+    were measured ("area_w"), else the whole bitmap (the 50x30 stock's calibration)."""
+    return p.get("area_w", p["w"])
+
+
+def _on_print_canvas(img, p):
+    """Place a layout rendered at the label's width onto the full bitmap the printer gets."""
+    if img.width == p["w"]:
+        return img
+    out = Image.new("L", (p["w"], p["h"]), 255)
+    out.paste(img, (p.get("area_x", 0), 0))
+    return out
+
+
+def _preview_crop(img, p):
+    """Previews show only the part that lands on the label."""
+    x0 = p.get("area_x", 0)
+    return img.crop((x0, 0, x0 + _area_w(p), p["h"]))
 
 
 def _wrap(draw, text, font, max_width):
@@ -122,6 +154,19 @@ def _ink_size(draw, text, font):
     slightly past the canvas edge and clip the last glyph."""
     l, t, r, b = draw.textbbox((0, 0), text, font=font)
     return (r - l), (b - t)
+
+
+def _ink_x(text, font):
+    """Left/right columns of the ink `text` really puts down when drawn at x=0.
+    textbbox()'s left edge is the glyph origin, not the ink: a 200 px bold "M"
+    starts inking ~18 px to its right, so centring by textbbox pushes such a
+    word ~9 px right. Rendering the line once and measuring it is exact."""
+    l, t, r, b = font.getbbox(text)
+    pad = 8
+    probe = Image.new("L", (r + 2 * pad, b + 2 * pad), 255)
+    ImageDraw.Draw(probe).text((pad, pad), text, font=font, fill=0)
+    bb = ImageOps.invert(probe).getbbox()
+    return (bb[0] - pad, bb[2] - pad) if bb else (l, r)
 
 
 # Real physical prints of large bold text clipped at the right edge even
@@ -216,7 +261,7 @@ def _grow_lines_independently(draw, lines, base_size, font_path, max_w, slack):
 
 def render_label(title, subtitle=None, extra_lines=None, preset=None):
     p = _preset(preset)
-    LABEL_W, LABEL_H, MARGIN, HORIZONTAL_SHIFT = p["w"], p["h"], p["margin"], p["shift_x"]
+    LABEL_W, LABEL_H, MARGIN, HORIZONTAL_SHIFT = _area_w(p), p["h"], p["margin"], p["shift_x"]
     img = Image.new("L", (LABEL_W, LABEL_H), 255)
     draw = ImageDraw.Draw(img)
     # A small fixed safety margin absorbs sub-pixel rounding between what
@@ -274,6 +319,8 @@ def render_label(title, subtitle=None, extra_lines=None, preset=None):
     y = max(MARGIN, (LABEL_H - total_h) // 2) + p["shift_y"]
     for (text, font), h in zip(blocks, heights):
         l, t, r, b = draw.textbbox((0, 0), text, font=font)
+        if p.get("ink_centre"):
+            l, r = _ink_x(text, font)   # centre the real ink (see _ink_x)
         w = r - l
         x = max(MARGIN, (LABEL_W - w) // 2) + HORIZONTAL_SHIFT
         # Compensate for the font's own left/top bearing so the actual ink
@@ -285,7 +332,24 @@ def render_label(title, subtitle=None, extra_lines=None, preset=None):
         draw.text((x - l, y - t), text, font=font, fill=0)
         y += h
 
-    return img
+    if p.get("ink_centre"):
+        # Line boxes keep room for descenders, so the block's ink sits a little
+        # high; move the finished ink so it is centred top-to-bottom as well.
+        img = _centre_ink_vertically(img, MARGIN)
+    return _on_print_canvas(img, p)
+
+
+def _centre_ink_vertically(img, margin):
+    bb = ImageOps.invert(img).getbbox()
+    if not bb:
+        return img
+    dy = (img.height - bb[3] - bb[1]) // 2
+    dy = max(margin - bb[1], min(dy, img.height - margin - bb[3]))
+    if not dy:
+        return img
+    moved = Image.new("L", img.size, 255)
+    moved.paste(img, (0, dy))
+    return moved
 
 
 def render_qr_label(data, caption=None, preset=None):
@@ -309,7 +373,7 @@ def render_qr_label(data, caption=None, preset=None):
     the same block would hug the top edge with a big empty area below, so
     there it is centered vertically instead."""
     p = _preset(preset)
-    LABEL_W, LABEL_H, MARGIN, HORIZONTAL_SHIFT = p["w"], p["h"], p["margin"], p["shift_x"]
+    LABEL_W, LABEL_H, MARGIN, HORIZONTAL_SHIFT = _area_w(p), p["h"], p["margin"], p["shift_x"]
     img = Image.new("L", (LABEL_W, LABEL_H), 255)
     draw = ImageDraw.Draw(img)
 
@@ -348,7 +412,9 @@ def render_qr_label(data, caption=None, preset=None):
         y_qr = y
 
     img.paste(qr_img, (x, y_qr))
-    return img
+    if p.get("ink_centre"):
+        img = _centre_ink_vertically(img, MARGIN)
+    return _on_print_canvas(img, p)
 
 
 def render_calibration(preset=None):
@@ -361,9 +427,12 @@ def render_calibration(preset=None):
     is. Ticks run inward from all four canvas edges: small every 16 px, medium
     every 64 px, long every 128 px and numbered with their canvas position
     (x along the top, y down the left). The centre cross marks where the
-    canvas centre falls, which is what centring errors show up against."""
+    canvas centre falls, which is what centring errors show up against.
+
+    The card covers the preset's layout area (area_w x h), so once a stock is
+    calibrated its frame should sit evenly just inside all four label edges."""
     p = _preset(preset)
-    W, H = p["w"], p["h"]
+    W, H = _area_w(p), p["h"]
     img = Image.new("L", (W, H), 255)
     d = ImageDraw.Draw(img)
     font = ImageFont.truetype(FONT_BOLD, 22)
@@ -394,7 +463,7 @@ def render_calibration(preset=None):
             break
         w = d.textbbox((0, 0), text, font=title_font)[2]
         d.text(((W - w) // 2, ty), text, font=title_font, fill=0)
-    return img
+    return _on_print_canvas(img, p)
 
 
 # --- Print jobs run against NiimPrintX's own asyncio API (rather than
@@ -523,6 +592,7 @@ def preview():
     if not lines:
         return jsonify(error="No text provided"), 400
     img = render_label(lines[0], extra_lines=lines[1:], preset=data.get('preset'))
+    img = _preview_crop(img, _preset(data.get('preset')))
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     b64 = base64.b64encode(buf.getvalue()).decode('ascii')
@@ -537,6 +607,7 @@ def preview_qrcode():
     if not payload:
         return jsonify(error="No data provided"), 400
     img = render_qr_label(payload, caption=caption, preset=data.get('preset'))
+    img = _preview_crop(img, _preset(data.get('preset')))
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     b64 = base64.b64encode(buf.getvalue()).decode('ascii')
@@ -594,7 +665,7 @@ def print_product(product_id):
 def presets():
     return jsonify(
         current=get_preset_id(),
-        presets=[{"id": k, "name": v["name"], "w": v["w"], "h": v["h"]} for k, v in LABEL_PRESETS.items()],
+        presets=[{"id": k, "name": v["name"], "w": _area_w(v), "h": v["h"]} for k, v in LABEL_PRESETS.items()],
     )
 
 
@@ -612,6 +683,7 @@ def set_preset():
 def preview_calibration():
     data = request.get_json(force=True, silent=True) or {}
     img = render_calibration(preset=data.get('preset'))
+    img = _preview_crop(img, _preset(data.get('preset')))
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     return jsonify(image="data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('ascii'))
