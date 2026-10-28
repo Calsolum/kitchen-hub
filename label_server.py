@@ -66,7 +66,11 @@ LABEL_PRESETS = {
     # _ink_x); the 50x30 stock keeps the old centring its shift_x was tuned with.
     "50x80": {"name": "50 × 80 mm", "w": 640, "h": 927, "area_x": 0, "area_w": 577,
               "margin": 20, "shift_x": 0, "shift_y": 0, "qr_pin_top": False,
-              "ink_centre": True},
+              "ink_centre": True,
+              # Text labels read along the 80 mm length (Tariq, 2026-10-27): laid out
+              # on an h x area_w (927 x 577) landscape canvas, then turned 90 degrees
+              # clockwise onto the roll. QR labels stay portrait (a bigger QR fits).
+              "text_landscape": True},
 }
 DEFAULT_PRESET = "50x30"
 PRESET_FILE = os.path.expanduser("~/.label_preset")
@@ -113,6 +117,17 @@ def _preview_crop(img, p):
     """Previews show only the part that lands on the label."""
     x0 = p.get("area_x", 0)
     return img.crop((x0, 0, x0 + _area_w(p), p["h"]))
+
+
+def _text_preview(img, p):
+    """A text label's preview, turned back so it reads the way it will be held."""
+    img = _preview_crop(img, p)
+    return img.transpose(Image.Transpose.ROTATE_90) if p.get("text_landscape") else img
+
+
+def _text_preview_size(p):
+    w, h = _area_w(p), p["h"]
+    return (h, w) if p.get("text_landscape") else (w, h)
 
 
 def _wrap(draw, text, font, max_width):
@@ -262,6 +277,8 @@ def _grow_lines_independently(draw, lines, base_size, font_path, max_w, slack):
 def render_label(title, subtitle=None, extra_lines=None, preset=None):
     p = _preset(preset)
     LABEL_W, LABEL_H, MARGIN, HORIZONTAL_SHIFT = _area_w(p), p["h"], p["margin"], p["shift_x"]
+    if p.get("text_landscape"):
+        LABEL_W, LABEL_H = LABEL_H, LABEL_W   # lay out along the length; turned at the end
     img = Image.new("L", (LABEL_W, LABEL_H), 255)
     draw = ImageDraw.Draw(img)
     # A small fixed safety margin absorbs sub-pixel rounding between what
@@ -336,6 +353,8 @@ def render_label(title, subtitle=None, extra_lines=None, preset=None):
         # Line boxes keep room for descenders, so the block's ink sits a little
         # high; move the finished ink so it is centred top-to-bottom as well.
         img = _centre_ink_vertically(img, MARGIN)
+    if p.get("text_landscape"):
+        img = img.transpose(Image.Transpose.ROTATE_270)   # 90 degrees clockwise, onto the roll
     return _on_print_canvas(img, p)
 
 
@@ -592,7 +611,7 @@ def preview():
     if not lines:
         return jsonify(error="No text provided"), 400
     img = render_label(lines[0], extra_lines=lines[1:], preset=data.get('preset'))
-    img = _preview_crop(img, _preset(data.get('preset')))
+    img = _text_preview(img, _preset(data.get('preset')))
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     b64 = base64.b64encode(buf.getvalue()).decode('ascii')
@@ -665,7 +684,9 @@ def print_product(product_id):
 def presets():
     return jsonify(
         current=get_preset_id(),
-        presets=[{"id": k, "name": v["name"], "w": _area_w(v), "h": v["h"]} for k, v in LABEL_PRESETS.items()],
+        # w/h: the text preview's shape (the dashboard sizes its preview box from it)
+        presets=[{"id": k, "name": v["name"], "w": _text_preview_size(v)[0], "h": _text_preview_size(v)[1]}
+                 for k, v in LABEL_PRESETS.items()],
     )
 
 
